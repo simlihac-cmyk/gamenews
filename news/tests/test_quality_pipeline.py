@@ -99,6 +99,53 @@ class QualityPipelineTests(TestCase):
         self.assertEqual(raw.rejection_reason, "hub_url")
         self.assertIn("quarantined", apply_out.getvalue())
 
+    def test_audit_news_quality_leaves_soft_title_cleanup_unchanged_by_default(self):
+        raw = self.make_raw(
+            "04/30/26 Get the most out of Pokémon Pokopia Read more",
+            "https://example.com/news/pokemon-pokopia",
+            published_at=timezone.now(),
+        )
+
+        out = StringIO()
+        call_command("audit_news_quality", "--apply", stdout=out)
+
+        raw.refresh_from_db()
+        self.assertEqual(raw.rejection_reason, "")
+        self.assertIn("0 item(s) quarantined", out.getvalue())
+        self.assertIn("soft cleanup-only", out.getvalue())
+
+    def test_audit_news_quality_apply_soft_can_quarantine_title_cleanup_findings(self):
+        raw = self.make_raw(
+            "04/30/26 Get the most out of Pokémon Pokopia Read more",
+            "https://example.com/news/pokemon-pokopia",
+            published_at=timezone.now(),
+        )
+
+        call_command("audit_news_quality", "--apply", "--apply-soft", stdout=StringIO())
+
+        raw.refresh_from_db()
+        self.assertEqual(raw.rejection_reason, "unclean_title")
+
+    def test_audit_news_quality_reasons_filter_limits_output(self):
+        hub = self.make_raw(
+            "Nintendo 64",
+            "https://example.com/platforms/nintendo/nintendo-64",
+            published_at=timezone.now(),
+        )
+        self.make_raw(
+            "04/30/26 Get the most out of Pokémon Pokopia Read more",
+            "https://example.com/news/pokemon-pokopia",
+            published_at=timezone.now(),
+        )
+
+        out = StringIO()
+        call_command("audit_news_quality", "--reasons", "hub_url", stdout=out)
+
+        output = out.getvalue()
+        self.assertIn(str(hub.pk), output)
+        self.assertIn("hub_url", output)
+        self.assertNotIn("read_more_in_title", output)
+
     def test_boilerplate_importance_is_zero(self):
         score = calculate_importance(source=self.source, title="Characters hub")
 
