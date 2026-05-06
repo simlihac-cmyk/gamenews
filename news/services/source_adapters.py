@@ -53,13 +53,13 @@ SOURCE_ADAPTERS: dict[str, dict[str, Any]] = {
         "timezone": "America/Los_Angeles",
         "language": "en",
         "region": "US",
-        "reject_url_patterns": ["/us/search", "/us/store", "/us/gaming-systems", "/news/rss"],
+        "reject_url_patterns": ["/us/search", "/us/store", "/us/games", "/us/switch", "/us/hardware", "/us/gaming-systems", "/news/rss"],
     },
     "nintendo-uk-news": {
         "timezone": "Europe/London",
         "language": "en",
         "region": "EU",
-        "reject_url_patterns": ["/Support/", "/Search/", "/Nintendo-eShop/", "/news/rss"],
+        "reject_url_patterns": ["/Hardware/", "/Games/", "/Support/", "/Search/", "/Nintendo-eShop/", "/Nintendo-Switch-2/", "/Nintendo-Switch/", "/news/rss"],
     },
     "nintendo-youtube-kr": {
         "timezone": "Asia/Seoul",

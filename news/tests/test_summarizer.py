@@ -101,20 +101,25 @@ class SummarizeItemsCommandTests(TestCase):
     def setUp(self) -> None:
         self.source = Source.objects.create(
             name="Nintendo UK News",
-            slug="nintendo-uk",
+            slug="nintendo-uk-news",
             url="https://example.com/feed",
             source_type=SourceType.RSS,
             trust_type=TrustType.OFFICIAL,
         )
 
     def make_item(self, title: str = "Nintendo Switch 2 update announced") -> NewsItem:
+        raw_text = (
+            "Nintendo announced a Switch 2 update with new system features. "
+            "The update improves setup, save data transfer, controller pairing, and online account handling. "
+            "Nintendo says more details are available through the official support and news pages."
+        )
         raw = RawItem.objects.create(
             source=self.source,
             title=title,
             url="https://example.com/news/switch-2-update-announced",
             canonical_url="https://example.com/news/switch-2-update-announced",
             published_at=timezone.now(),
-            raw_text="Nintendo announced a Switch 2 update with new system features.",
+            raw_text=raw_text,
             content_hash=create_content_hash(title, "https://example.com/news/switch-2-update-announced"),
         )
         item, _created = process_raw_item(raw)
@@ -155,6 +160,93 @@ class SummarizeItemsCommandTests(TestCase):
         self.assertIn(f'"id": {item.pk}', prompt)
         self.assertIn(summary_token_for(item), prompt)
         self.assertIn("응답은 설명 없이", prompt)
+        self.assertIn("quality_notes", prompt)
+
+    def test_export_summary_batch_skips_low_quality_hub_pages_by_default(self):
+        good = self.make_item("Nintendo Switch 2 system update announced")
+        NewsItem.objects.filter(pk=good.pk).update(summary_ko="")
+        hub_raw = RawItem.objects.create(
+            source=self.source,
+            title="Nintendo Switch 2 bundles",
+            url="https://www.nintendo.com/en-gb/Hardware/Nintendo-Switch-2/Nintendo-Switch-2-Bundles",
+            canonical_url="https://www.nintendo.com/en-gb/Hardware/Nintendo-Switch-2/Nintendo-Switch-2-Bundles",
+            published_at=timezone.now(),
+            raw_text="Nintendo Switch 2 bundles",
+            content_hash=create_content_hash(
+                "Nintendo Switch 2 bundles",
+                "https://www.nintendo.com/en-gb/Hardware/Nintendo-Switch-2/Nintendo-Switch-2-Bundles",
+            ),
+        )
+        hub = NewsItem.objects.create(
+            raw_item=hub_raw,
+            source=self.source,
+            title="Nintendo Switch 2 bundles",
+            normalized_title="nintendo switch2 bundles",
+            url=hub_raw.url,
+            canonical_url=hub_raw.canonical_url,
+            summary_ko="",
+            trust_label=TrustLabel.OFFICIAL,
+            category="official",
+            detected_tags=["switch2"],
+            confidence_score=90,
+            importance_score=90,
+            extraction_confidence=100,
+            published_at=timezone.now(),
+            first_seen_at=timezone.now(),
+        )
+
+        out = StringIO()
+        err = StringIO()
+        call_command("export_summary_batch", "--limit", "20", "--show-skips", stdout=out, stderr=err)
+
+        prompt = out.getvalue()
+        self.assertIn(f'"id": {good.pk}', prompt)
+        self.assertNotIn(f'"id": {hub.pk}', prompt)
+        self.assertIn("hub_url", err.getvalue())
+
+    def test_export_summary_batch_can_include_low_quality_with_notes(self):
+        hub_raw = RawItem.objects.create(
+            source=self.source,
+            title="Nintendo Switch 2 games",
+            url="https://www.nintendo.com/en-gb/Games/Nintendo-Switch-2-games",
+            canonical_url="https://www.nintendo.com/en-gb/Games/Nintendo-Switch-2-games",
+            published_at=timezone.now(),
+            raw_text="Nintendo Switch 2 games",
+            content_hash=create_content_hash("Nintendo Switch 2 games", "https://www.nintendo.com/en-gb/Games/Nintendo-Switch-2-games"),
+        )
+        hub = NewsItem.objects.create(
+            raw_item=hub_raw,
+            source=self.source,
+            title="Nintendo Switch 2 games",
+            normalized_title="nintendo switch2 games",
+            url=hub_raw.url,
+            canonical_url=hub_raw.canonical_url,
+            summary_ko="",
+            trust_label=TrustLabel.OFFICIAL,
+            category="official",
+            detected_tags=["switch2"],
+            confidence_score=90,
+            importance_score=90,
+            extraction_confidence=100,
+            published_at=timezone.now(),
+            first_seen_at=timezone.now(),
+        )
+
+        out = StringIO()
+        call_command(
+            "export_summary_batch",
+            "--item",
+            str(hub.pk),
+            "--include-low-quality",
+            "--min-raw-chars",
+            "0",
+            stdout=out,
+        )
+
+        prompt = out.getvalue()
+        self.assertIn(f'"id": {hub.pk}', prompt)
+        self.assertIn('"quality_notes": [', prompt)
+        self.assertIn('"hub_url"', prompt)
 
     def test_import_summary_batch_updates_matching_item(self):
         item = self.make_item()

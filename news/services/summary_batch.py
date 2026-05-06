@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from news.models import NewsItem
-from news.services.quality import is_generic_summary
+from news.services.quality import LOW_CONFIDENCE_THRESHOLD, article_rejection_reason, is_generic_summary
 from news.services.text import normalize_whitespace, truncate
 
 
-BATCH_SCHEMA = "nintendowatch_summary_batch_v1"
+BATCH_SCHEMA = "nintendowatch_summary_batch_v2"
 SUMMARY_PREFIXES = ("무슨 일?:", "왜 중요?:", "확인 상태:", "주의:")
+DEFAULT_MIN_RAW_CHARS = 160
 
 
 @dataclass(frozen=True)
@@ -32,11 +33,12 @@ def build_summary_batch_prompt(
     *,
     target: str = "generic",
     max_source_chars: int = 1800,
+    min_raw_chars: int = DEFAULT_MIN_RAW_CHARS,
 ) -> str:
     payload = {
         "schema": BATCH_SCHEMA,
         "target": target,
-        "items": [summary_export_payload(item, max_source_chars=max_source_chars) for item in items],
+        "items": [summary_export_payload(item, max_source_chars=max_source_chars, min_raw_chars=min_raw_chars) for item in items],
     }
     target_name = {"chatgpt": "ChatGPT", "gemini": "Gemini"}.get(target, "LLM")
     return "\n".join(
@@ -47,6 +49,8 @@ def build_summary_batch_prompt(
             "",
             "규칙:",
             "- 원문을 길게 번역하거나 복사하지 말고, 제공된 제목/출처/발췌만 근거로 자체 요약을 작성하세요.",
+            "- `raw_excerpt`에 없는 가격, 날짜, 지역, 수량, 공식 확인 여부를 추정하지 마세요.",
+            "- `quality_notes`가 비어 있지 않으면 해당 항목은 원문 품질 확인이 필요한 항목이므로 단정적인 표현을 피하세요.",
             "- 각 `summary_ko`는 반드시 네 줄 형식으로 작성하세요: `무슨 일?:`, `왜 중요?:`, `확인 상태:`, `주의:`",
             "- 루머/유출/미확인 항목은 공식 확인 전이라는 점을 분명히 쓰세요.",
             "- 과장하거나 입력에 없는 사실을 만들지 마세요.",
@@ -67,13 +71,22 @@ def build_summary_batch_prompt(
     )
 
 
-def summary_export_payload(item: NewsItem, *, max_source_chars: int = 1800) -> dict[str, Any]:
+def summary_export_payload(
+    item: NewsItem,
+    *,
+    max_source_chars: int = 1800,
+    min_raw_chars: int = DEFAULT_MIN_RAW_CHARS,
+) -> dict[str, Any]:
     raw_text = item.raw_item.raw_text or item.summary_original
+    raw_excerpt = truncate(raw_text, max_source_chars)
+    metadata = item.raw_item.metadata or {}
     return {
         "id": item.pk,
         "token": summary_token_for(item),
         "title": item.title,
+        "raw_title": item.raw_item.title,
         "source": item.source.name,
+        "source_group": item.source.source_group_ko,
         "trust_label": item.trust_label,
         "trust_label_ko": item.trust_label_ko,
         "category": item.category,
@@ -81,9 +94,16 @@ def summary_export_payload(item: NewsItem, *, max_source_chars: int = 1800) -> d
         "tags": item.detected_tags or [],
         "importance_score": item.importance_score,
         "trust_score": item.confidence_score,
+        "extraction_confidence": item.extraction_confidence,
         "published_at": item.published_at.isoformat() if item.published_at else "",
+        "raw_published_at_text": item.raw_item.raw_published_at_text,
         "url": item.url,
-        "raw_excerpt": truncate(raw_text, max_source_chars),
+        "canonical_url": item.canonical_url or "",
+        "original_source": metadata.get("original_source", ""),
+        "display_source": metadata.get("display_source", item.source.name),
+        "raw_excerpt_chars": len(normalize_whitespace(raw_text)),
+        "quality_notes": summary_export_rejection_reasons(item, min_raw_chars=min_raw_chars),
+        "raw_excerpt": raw_excerpt,
     }
 
 
@@ -126,10 +146,47 @@ def normalize_imported_summary(value: str) -> str:
     raise ValueError("summary_ko must include the four required Korean summary lines")
 
 
-def should_export_for_summary(item: NewsItem, *, force: bool = False) -> bool:
-    if force:
+def should_export_for_summary(
+    item: NewsItem,
+    *,
+    force: bool = False,
+    include_low_quality: bool = False,
+    min_raw_chars: int = DEFAULT_MIN_RAW_CHARS,
+) -> bool:
+    has_useful_summary = item.summary_ko and not is_generic_summary(item.summary_ko)
+    if has_useful_summary and not force:
+        return False
+    if include_low_quality:
         return True
-    return not item.summary_ko or is_generic_summary(item.summary_ko)
+    return not summary_export_rejection_reasons(item, min_raw_chars=min_raw_chars)
+
+
+def summary_export_rejection_reasons(item: NewsItem, *, min_raw_chars: int = DEFAULT_MIN_RAW_CHARS) -> list[str]:
+    raw_text = item.raw_item.raw_text or item.summary_original
+    reasons: list[str] = []
+    if item.is_archived:
+        reasons.append("archived")
+    if item.is_date_suspect:
+        reasons.append("date_suspect")
+    if item.raw_item.rejection_reason:
+        reasons.append(f"raw_rejected:{item.raw_item.rejection_reason}")
+    if item.extraction_confidence < LOW_CONFIDENCE_THRESHOLD:
+        reasons.append("low_extraction_confidence")
+    article_reason = article_rejection_reason(
+        title=item.raw_item.title or item.title,
+        url=item.canonical_url or item.url,
+        raw_text=raw_text,
+        published_at=item.published_at,
+        source=item.source,
+    )
+    if article_reason:
+        reasons.append(article_reason)
+    clean_raw = normalize_whitespace(raw_text)
+    if len(clean_raw) < min_raw_chars:
+        reasons.append("raw_text_too_short")
+    if clean_raw and normalize_whitespace(item.raw_item.title).casefold() == clean_raw.casefold():
+        reasons.append("raw_text_same_as_title")
+    return _dedupe(reasons)
 
 
 def token_matches(item: NewsItem, token: str) -> bool:
@@ -158,3 +215,14 @@ def _json_candidates(text: str) -> list[str]:
     if array_start >= 0 and array_end > array_start:
         candidates.append(text[array_start : array_end + 1])
     return candidates
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
