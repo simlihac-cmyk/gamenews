@@ -117,6 +117,24 @@ launchctl kickstart -k gui/$(id -u)/com.sg_mac.gamenews
 
 이 launchd 작업은 `/Users/sg_mac/gamenews/deploy/start-prod.sh`를 실행해서 `docker compose -f docker-compose.prod.yml up -d`를 호출합니다.
 
+뉴스 수집을 30분마다 실행하려면:
+
+```bash
+cp deploy/launchd/com.nintendowatch.fetch.plist.example ~/Library/LaunchAgents/com.nintendowatch.fetch.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nintendowatch.fetch.plist
+launchctl kickstart -k gui/$(id -u)/com.nintendowatch.fetch
+```
+
+PostgreSQL 백업을 매일 04:10에 실행하려면:
+
+```bash
+cp deploy/launchd/com.nintendowatch.backup.plist.example ~/Library/LaunchAgents/com.nintendowatch.backup.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nintendowatch.backup.plist
+launchctl kickstart -k gui/$(id -u)/com.nintendowatch.backup
+```
+
+백업 파일은 `/Users/sg_mac/gamenews/backups/postgres/`에 `nintendowatch-YYYYMMDD-HHMMSS.sql.gz` 형식으로 저장되고, 기본 보관 기간은 30일입니다.
+
 ### 데이터베이스
 
 Docker Compose 기준 기본값입니다.

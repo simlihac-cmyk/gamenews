@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.nintendowatch.fetch</string>
+  <string>com.nintendowatch.backup</string>
 
   <key>UserName</key>
   <string>sg_mac</string>
@@ -16,7 +16,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>./scripts/macmini_fetch.sh</string>
+    <string>./scripts/macmini_backup_db.sh</string>
   </array>
 
   <key>EnvironmentVariables</key>
@@ -27,16 +27,18 @@
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 
-  <key>RunAtLoad</key>
-  <true/>
-
-  <key>StartInterval</key>
-  <integer>1800</integer>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>10</integer>
+  </dict>
 
   <key>StandardOutPath</key>
-  <string>/Users/sg_mac/Library/Logs/com.nintendowatch.fetch.out.log</string>
+  <string>/Users/sg_mac/Library/Logs/com.nintendowatch.backup.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/sg_mac/Library/Logs/com.nintendowatch.fetch.err.log</string>
+  <string>/Users/sg_mac/Library/Logs/com.nintendowatch.backup.err.log</string>
 </dict>
 </plist>
