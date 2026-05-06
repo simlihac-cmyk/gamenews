@@ -269,10 +269,10 @@ class Issue(models.Model):
     @property
     def status_ko(self) -> str:
         return {
-            IssueStatus.RUMOR: "루머",
+            IssueStatus.RUMOR: "루머 관찰 중",
             IssueStatus.DEVELOPING: "전개 중",
-            IssueStatus.CONFIRMED: "확정",
-            IssueStatus.DEBUNKED: "부정됨",
+            IssueStatus.CONFIRMED: "공식 확정",
+            IssueStatus.DEBUNKED: "반박됨",
             IssueStatus.STALE: "오래됨",
         }.get(self.status, "전개 중")
 

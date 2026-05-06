@@ -1,9 +1,12 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.db import transaction
 from django.db.models import Count
+from django.utils import timezone
 
 from .models import (
     Franchise,
     Issue,
+    IssueStatus,
     NewsItem,
     NewsItemFranchise,
     NewsItemIssue,
@@ -11,6 +14,15 @@ from .models import (
     RawItem,
     Source,
 )
+
+
+ISSUE_STATUS_PRECEDENCE = {
+    IssueStatus.CONFIRMED: 50,
+    IssueStatus.DEBUNKED: 45,
+    IssueStatus.DEVELOPING: 30,
+    IssueStatus.RUMOR: 20,
+    IssueStatus.STALE: 10,
+}
 
 
 @admin.register(Source)
@@ -95,6 +107,77 @@ class IssueAdmin(admin.ModelAdmin):
     search_fields = ("title", "canonical_topic")
     readonly_fields = ("created_at", "updated_at")
     date_hierarchy = "last_updated_at"
+    inlines = [NewsItemIssueInline]
+    actions = ["merge_selected_issues", "mark_confirmed", "mark_debunked", "mark_stale"]
+
+    @admin.action(description="선택한 이슈를 가장 오래된 이슈로 병합")
+    def merge_selected_issues(self, request, queryset):
+        issues = list(queryset.order_by("created_at", "pk"))
+        if len(issues) < 2:
+            self.message_user(request, "병합하려면 이슈를 2개 이상 선택하세요.", level=messages.WARNING)
+            return
+
+        primary = issues[0]
+        with transaction.atomic():
+            for issue in issues[1:]:
+                for link in issue.news_links.select_related("news_item"):
+                    NewsItemIssue.objects.get_or_create(
+                        news_item=link.news_item,
+                        issue=primary,
+                        defaults={"relation": link.relation},
+                    )
+
+                primary.status = _higher_issue_status(primary.status, issue.status)
+                primary.confidence_score = max(primary.confidence_score, issue.confidence_score)
+                primary.first_seen_at = min(primary.first_seen_at, issue.first_seen_at)
+                primary.last_updated_at = max(primary.last_updated_at, issue.last_updated_at)
+                if issue.official_confirmed_at:
+                    if primary.official_confirmed_at is None:
+                        primary.official_confirmed_at = issue.official_confirmed_at
+                    else:
+                        primary.official_confirmed_at = min(primary.official_confirmed_at, issue.official_confirmed_at)
+                issue.delete()
+
+            primary.save(
+                update_fields=[
+                    "status",
+                    "confidence_score",
+                    "first_seen_at",
+                    "last_updated_at",
+                    "official_confirmed_at",
+                    "updated_at",
+                ]
+            )
+
+        self.message_user(request, f"{len(issues)}개 이슈를 '{primary.title}' 이슈로 병합했습니다.")
+
+    @admin.action(description="선택한 이슈를 공식 확정으로 표시")
+    def mark_confirmed(self, request, queryset):
+        now = timezone.now()
+        updated = 0
+        for issue in queryset:
+            issue.status = IssueStatus.CONFIRMED
+            if issue.official_confirmed_at is None:
+                issue.official_confirmed_at = now
+            issue.save(update_fields=["status", "official_confirmed_at", "updated_at"])
+            updated += 1
+        self.message_user(request, f"{updated}개 이슈를 공식 확정으로 표시했습니다.")
+
+    @admin.action(description="선택한 이슈를 반박됨으로 표시")
+    def mark_debunked(self, request, queryset):
+        updated = queryset.update(status=IssueStatus.DEBUNKED, updated_at=timezone.now())
+        self.message_user(request, f"{updated}개 이슈를 반박됨으로 표시했습니다.")
+
+    @admin.action(description="선택한 이슈를 오래됨으로 표시")
+    def mark_stale(self, request, queryset):
+        updated = queryset.update(status=IssueStatus.STALE, updated_at=timezone.now())
+        self.message_user(request, f"{updated}개 이슈를 오래됨으로 표시했습니다.")
+
+
+def _higher_issue_status(left: str, right: str) -> str:
+    left_score = ISSUE_STATUS_PRECEDENCE.get(left, 0)
+    right_score = ISSUE_STATUS_PRECEDENCE.get(right, 0)
+    return right if right_score > left_score else left
 
 
 @admin.register(Franchise)

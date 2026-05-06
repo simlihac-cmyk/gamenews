@@ -65,6 +65,18 @@ DEFAULT_TITLE_EXCLUDE_EXACT = {
     "rss feed",
     "subscribe to our rss feed",
 }
+RELATED_CATEGORY_GROUPS = [
+    {NewsCategory.RUMOR, NewsCategory.LEAK},
+    {
+        NewsCategory.OFFICIAL,
+        NewsCategory.DIRECT,
+        NewsCategory.RELEASE_DATE,
+        NewsCategory.TRAILER,
+        NewsCategory.NEW_GAME,
+        NewsCategory.UPDATE,
+        NewsCategory.GENERAL,
+    },
+]
 
 
 @dataclass
@@ -625,22 +637,53 @@ def _find_related_issue(news_item: NewsItem) -> Issue | None:
     cutoff = timezone.now() - timedelta(days=14)
     best_issue = None
     best_score = 0.0
-    candidates = Issue.objects.filter(last_updated_at__gte=cutoff).prefetch_related("news_links__news_item")[:200]
+    news_franchise_ids = {link.franchise_id for link in news_item.franchise_links.all()}
+    candidates = Issue.objects.filter(last_updated_at__gte=cutoff).prefetch_related(
+        "news_links__news_item__franchise_links",
+    )[:200]
     for issue in candidates:
         issue_tokens = tokenize_topic(f"{issue.canonical_topic} {issue.title}")
         if not issue_tokens:
             continue
         overlap = len(tokens & issue_tokens)
-        if overlap < 2:
+        issue_items = [link.news_item for link in issue.news_links.all()]
+        same_category = any(item.category == news_item.category for item in issue_items)
+        related_category = any(_categories_related(news_item.category, item.category) for item in issue_items)
+        issue_franchise_ids = {
+            franchise_link.franchise_id
+            for item in issue_items
+            for franchise_link in item.franchise_links.all()
+        }
+        shared_franchise = bool(news_franchise_ids and news_franchise_ids & issue_franchise_ids)
+        confirmation_candidate = (
+            news_item.trust_label == TrustLabel.OFFICIAL
+            and issue.status in {IssueStatus.RUMOR, IssueStatus.DEVELOPING}
+        )
+        min_overlap = 1 if shared_franchise and (related_category or confirmation_candidate) else 2
+        if overlap < min_overlap:
             continue
-        same_category = any(link.news_item.category == news_item.category for link in issue.news_links.all())
+
         score = overlap / max(min(len(tokens), len(issue_tokens)), 1)
         if same_category:
             score += 0.15
-        if score > best_score and score >= 0.35:
+        elif related_category:
+            score += 0.08
+        if shared_franchise:
+            score += 0.2
+        if confirmation_candidate:
+            score += 0.1
+
+        threshold = 0.3 if shared_franchise and (related_category or confirmation_candidate) else 0.35
+        if score > best_score and score >= threshold:
             best_issue = issue
             best_score = score
     return best_issue
+
+
+def _categories_related(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    return any(left in group and right in group for group in RELATED_CATEGORY_GROUPS)
 
 
 def _entry_content(entry) -> str:

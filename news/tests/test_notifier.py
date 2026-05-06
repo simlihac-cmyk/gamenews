@@ -128,6 +128,23 @@ class NotifierTests(TestCase):
     @override_settings(
         NOTIFICATIONS_ENABLED=True,
         NOTIFICATION_MIN_IMPORTANCE=80,
+        NTFY_TOPIC="",
+        DISCORD_WEBHOOK_URL="https://discord.example.test/webhook",
+    )
+    def test_discord_failure_records_failed_attempt_without_raising(self):
+        item = self.make_item()
+
+        with patch("news.services.notifier.httpx.post", side_effect=httpx.TimeoutException("timeout")):
+            notifications = notify_if_needed(item)
+
+        self.assertEqual(len(notifications), 1)
+        self.assertEqual(notifications[0].channel, NotificationChannel.DISCORD)
+        self.assertEqual(notifications[0].status, NotificationStatus.FAILED)
+        self.assertIn("timeout", notifications[0].error)
+
+    @override_settings(
+        NOTIFICATIONS_ENABLED=True,
+        NOTIFICATION_MIN_IMPORTANCE=80,
         NTFY_SERVER="https://ntfy.example.test",
         NTFY_TOPIC="nintendo-watch",
         DISCORD_WEBHOOK_URL="",

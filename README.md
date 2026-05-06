@@ -47,6 +47,42 @@ docker compose -f docker-compose.prod.yml exec web python manage.py seed_sources
 docker compose -f docker-compose.prod.yml exec web python manage.py fetch_news --limit 20
 ```
 
+## 한 줄 릴리스
+
+개발 repo(`/Users/sg_mac/gamenews_dev`)에서 배포 repo(`/Users/sg_mac/gamenews`)로 반영할 때는 버전을 붙여 아래 한 줄을 실행합니다.
+
+```bash
+./scripts/release_to_deploy.sh v1.0.0
+```
+
+커밋 메시지를 직접 쓰고 싶으면 버전 뒤에 붙이면 됩니다.
+
+```bash
+./scripts/release_to_deploy.sh v1.0.1 "알림과 이슈 추적 보강"
+```
+
+이 명령은 다음 작업을 순서대로 처리합니다.
+
+- 개발 repo의 현재 변경사항을 `git add -A`로 스테이징
+- 변경사항이 있으면 `Release vX.Y.Z` 커밋 생성
+- `vX.Y.Z` annotated tag 생성
+- `deploy` remote의 `main` 브랜치와 tag push
+- `/Users/sg_mac/gamenews` 배포 폴더에서 `git pull --ff-only`
+- production Docker 이미지 재빌드 및 컨테이너 재기동
+- production DB migration과 `collectstatic` 실행
+
+기본값은 아래처럼 바꿀 수 있습니다.
+
+```bash
+DEPLOY_APP_DIR=/Users/sg_mac/gamenews DEPLOY_REMOTE=deploy DEPLOY_BRANCH=main ./scripts/release_to_deploy.sh v1.0.0
+```
+
+개발 컨테이너가 떠 있으면 릴리스 전에 테스트를 실행합니다. 테스트를 건너뛰려면:
+
+```bash
+RELEASE_RUN_TESTS=0 ./scripts/release_to_deploy.sh v1.0.0
+```
+
 ## .env 설정
 
 배포할 때는 `.env.production.example`을 복사해서 `.env`를 만듭니다.
@@ -176,6 +212,19 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 
 둘 다 설정하면 중요 뉴스가 ntfy와 Discord 양쪽으로 전송됩니다. 성공한 알림은 항목/채널별로 중복 발송하지 않습니다.
+
+### 이슈/루머 추적
+
+새 뉴스가 저장될 때 최근 14일 이내 이슈와 자동으로 연결합니다.
+
+- 제목 정규화 토큰 겹침
+- 같은/연관 카테고리
+- 같은 프랜차이즈 감지 결과
+- 공식 출처가 기존 루머/전개 중 이슈를 확인하는지 여부
+
+이슈 상태는 `루머 관찰 중`, `전개 중`, `공식 확정`, `반박됨`, `오래됨`으로 표시됩니다. 공식 뉴스가 기존 루머/전개 중 이슈와 연결되면 `공식 확정`으로 바뀌고 공식 확인 시각이 기록됩니다.
+
+반박 여부는 자동 추론을 공격적으로 하지 않습니다. Django admin의 Issue 화면에서 이슈를 수동으로 `공식 확정`, `반박됨`, `오래됨`으로 표시하거나, 중복 이슈를 선택해서 가장 오래된 이슈로 병합할 수 있습니다.
 
 ### 수집 타임아웃
 
@@ -338,6 +387,6 @@ YouTube RSS:
 
 - HTML 소스는 selector 품질에 따라 수집 정확도가 달라집니다.
 - 한국어 요약은 rule-based이며 외부 LLM API를 호출하지 않습니다.
-- 이슈 그룹핑은 최근 14일 제목 토큰 겹침 기반입니다.
+- 이슈 그룹핑은 최근 14일 제목 토큰, 카테고리, 프랜차이즈 기반의 단순 규칙입니다.
 - YouTube Korea 소스는 channel ID를 입력한 뒤 활성화해야 합니다.
 - 검색은 아직 PostgreSQL full-text search가 아니라 단순 DB 검색입니다.
