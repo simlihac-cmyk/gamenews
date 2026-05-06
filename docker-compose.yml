@@ -1,14 +1,14 @@
 services:
   web:
     build: .
-    command: python manage.py runserver 0.0.0.0:8000
+    command: python manage.py runserver 0.0.0.0:7500
     env_file:
       - path: .env
         required: false
     volumes:
       - .:/app
     ports:
-      - "7500:8000"
+      - "7500:7500"
     depends_on:
       - db
 

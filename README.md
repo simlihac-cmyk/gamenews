@@ -94,14 +94,14 @@ USE_X_FORWARDED_PROTO=true
 USE_X_FORWARDED_HOST=true
 ```
 
-Caddy, nginx, Cloudflare Tunnel 같은 reverse proxy가 HTTPS를 받고 내부 Docker 서비스의 `8000` 포트로 넘기는 구조를 전제로 합니다. proxy는 최소한 아래 헤더를 넘겨야 합니다.
+Caddy, nginx, Cloudflare Tunnel 같은 reverse proxy가 HTTPS를 받고 production Docker 서비스의 `7974` 포트로 넘기는 구조를 전제로 합니다. proxy는 최소한 아래 헤더를 넘겨야 합니다.
 
 ```text
 Host: gamenews.monosaccharide180.com
 X-Forwarded-Proto: https
 ```
 
-현재 production compose는 Mac mini 호스트의 `7974` 포트를 컨테이너 내부 `8000` 포트로 연결합니다. reverse proxy나 Cloudflare Tunnel은 `localhost:7974`로 넘기면 됩니다.
+현재 production compose는 Mac mini 호스트의 `7974` 포트를 컨테이너 내부 `7974` 포트로 연결합니다. reverse proxy나 Cloudflare Tunnel은 `localhost:7974`로 넘기면 됩니다.
 
 로컬 개발 중에는 `.env.example`을 쓰면 되고, 그 경우 HTTPS 관련 값은 필요 없습니다.
 

@@ -1,12 +1,12 @@
 services:
   web:
     build: .
-    command: gunicorn nintendowatch.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60
+    command: gunicorn nintendowatch.wsgi:application --bind 0.0.0.0:7974 --workers 2 --timeout 60
     env_file:
       - path: .env
         required: false
     ports:
-      - "7974:8000"
+      - "7974:7974"
     depends_on:
       - db
     restart: unless-stopped
