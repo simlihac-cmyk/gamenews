@@ -29,6 +29,12 @@ docker compose exec web python manage.py seed_sources
 docker compose exec web python manage.py fetch_news --limit 20
 ```
 
+개발 서버는 Mac mini 호스트의 `7500` 포트에서 열립니다.
+
+```text
+http://127.0.0.1:7500/
+```
+
 배포용 실행:
 
 ```bash
