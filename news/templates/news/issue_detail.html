@@ -21,8 +21,8 @@
     <span>{{ issue.official_confirmed_at|date:"Y-m-d H:i" }}</span>
   </section>
 {% endif %}
-<div class="issue-timeline">
-  {% for link in links %}
+<section class="issue-timeline" aria-label="핵심 타임라인">
+  {% for link in core_links %}
     <div class="timeline-entry {{ link.news_item.trust_label }}">
       <div class="timeline-dot">{{ forloop.counter }}</div>
       <div class="card">
@@ -58,7 +58,30 @@
       </div>
     </div>
   {% empty %}
-    <div class="card">연결된 항목이 없습니다.</div>
+    <div class="card">핵심 타임라인 항목이 없습니다.</div>
   {% endfor %}
-</div>
+</section>
+
+{% if related_links %}
+  <section class="card" style="margin-top: 16px;">
+    <h2>관련 항목</h2>
+    <p class="muted">같은 이야기로 확정되지 않은 항목입니다. 핵심 타임라인과 분리해서 확인하세요.</p>
+    <div class="stack">
+      {% for link in related_links %}
+        <div>
+          <div class="badge-row">
+            <span class="badge {{ link.news_item.trust_label }}">{% if link.news_item.trust_label == "official" %}공식 출처{% else %}{{ link.news_item.trust_label_ko }}{% endif %}</span>
+            <span class="badge">{{ link.relation|relation_label }}</span>
+          </div>
+          <h2 class="item-title"><a href="{% url 'news:item_detail' link.news_item.pk %}">{{ link.news_item.title }}</a></h2>
+          <div class="meta">
+            <span>{{ link.news_item.source.name }}</span>
+            <span>{% if link.news_item.published_at %}게시 {{ link.news_item.published_at|date:"Y-m-d H:i" }} KST{% else %}게시일 미상{% endif %}</span>
+            {% if link.explanation %}<span>{{ link.explanation }}</span>{% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
 {% endblock %}

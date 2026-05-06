@@ -225,6 +225,37 @@ class IssueGroupingTests(TestCase):
             youtube_item.issue_links.get().issue_id,
         )
 
+    def test_issue_detail_separates_related_items_from_core_timeline(self):
+        rumor_raw = self.make_raw_item(
+            self.rumor_source,
+            "Zelda remake leak reportedly planned",
+            "https://rumor.example/zelda-remake-leak",
+        )
+        related_raw = self.make_raw_item(
+            self.rumor_source,
+            "Nintendo Switch 2 accessory rumor roundup",
+            "https://rumor.example/switch-2-accessory-roundup",
+        )
+        core_item, _ = process_raw_item(rumor_raw)
+        related_item, _ = process_raw_item(related_raw)
+        issue = core_item.issue_links.get().issue
+        related_item.issue_links.all().delete()
+        NewsItemIssue.objects.create(
+            news_item=related_item,
+            issue=issue,
+            relation=IssueRelation.RELATED,
+            relation_confidence=0.2,
+            explanation="manual related only",
+        )
+
+        response = self.client.get(reverse("news:issue_detail", args=[issue.pk]))
+        html = response.content.decode()
+
+        self.assertContains(response, "관련 항목")
+        self.assertContains(response, "같은 이야기로 확정되지 않은 항목입니다")
+        self.assertLess(html.index("Zelda remake leak reportedly planned"), html.index("관련 항목"))
+        self.assertGreater(html.index("Nintendo Switch 2 accessory rumor roundup"), html.index("관련 항목"))
+
     def test_item_search_finds_matching_title(self):
         raw_item = self.make_raw_item(
             self.official_source,

@@ -19,7 +19,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .forms import NewsItemFilterForm
-from .models import Franchise, Issue, IssueStatus, NewsItem, NewsItemIssue, RawItem, Source, UserFranchiseFavorite
+from .models import Franchise, Issue, IssueRelation, IssueStatus, NewsItem, NewsItemIssue, RawItem, Source, UserFranchiseFavorite
 from .services.collectors import collect_source, process_raw_item, recalculate_news_item
 from .services.quality import LOW_CONFIDENCE_THRESHOLD, fallback_summary_for, is_generic_summary, public_excerpt
 
@@ -147,6 +147,61 @@ def _source_status(source: Source) -> dict[str, str]:
     return {"label": "정상", "class": "confirmed", "reason": "최근 수집 성공"}
 
 
+def _group_sources(sources) -> list[dict[str, object]]:
+    order = ["official", "press", "rumor", "other"]
+    grouped = {key: {"key": key, "label": "", "description": "", "sources": []} for key in order}
+    for source in sources:
+        group = grouped.setdefault(
+            source.source_group_key,
+            {"key": source.source_group_key, "label": source.source_group_ko, "description": source.source_group_description, "sources": []},
+        )
+        group["label"] = source.source_group_ko
+        group["description"] = source.source_group_description
+        group["sources"].append(source)
+    return [grouped[key] for key in order if grouped.get(key, {}).get("sources")]
+
+
+def _active_filter_chips(request, form: NewsItemFilterForm) -> list[dict[str, str]]:
+    if not form.is_valid():
+        return []
+    data = form.cleaned_data
+    chips: list[dict[str, str]] = []
+
+    def remove_query(*keys: str) -> str:
+        query = request.GET.copy()
+        for key in keys:
+            query.pop(key, None)
+        query.pop("page", None)
+        encoded = query.urlencode()
+        return f"{reverse('news:item_list')}?{encoded}" if encoded else reverse("news:item_list")
+
+    if data.get("q"):
+        chips.append({"label": f"검색: {data['q']}", "url": remove_query("q")})
+    if data.get("trust_label"):
+        chips.append({"label": f"신뢰도: {dict(form.fields['trust_label'].choices).get(data['trust_label'], data['trust_label'])}", "url": remove_query("trust_label")})
+    if data.get("category"):
+        chips.append({"label": f"카테고리: {dict(form.fields['category'].choices).get(data['category'], data['category'])}", "url": remove_query("category")})
+    if data.get("source"):
+        chips.append({"label": f"출처: {data['source'].name}", "url": remove_query("source")})
+    if data.get("franchise"):
+        chips.append({"label": f"프랜차이즈: {data['franchise'].name}", "url": remove_query("franchise")})
+    if data.get("min_importance") is not None:
+        chips.append({"label": f"중요도 {data['min_importance']}+", "url": remove_query("min_importance")})
+    if data.get("date_from") or data.get("date_to"):
+        start = data.get("date_from").isoformat() if data.get("date_from") else "처음"
+        end = data.get("date_to").isoformat() if data.get("date_to") else "현재"
+        chips.append({"label": f"날짜: {start} ~ {end}", "url": remove_query("date_from", "date_to")})
+    if data.get("is_read") in {"true", "false"}:
+        chips.append({"label": "읽음" if data["is_read"] == "true" else "읽지 않음", "url": remove_query("is_read")})
+    if data.get("is_bookmarked") in {"true", "false"}:
+        chips.append({"label": "북마크" if data["is_bookmarked"] == "true" else "북마크 아님", "url": remove_query("is_bookmarked")})
+    if data.get("favorites_only"):
+        chips.append({"label": "관심작만", "url": remove_query("favorites_only")})
+    if data.get("sort") == "detected":
+        chips.append({"label": "수집순", "url": remove_query("sort")})
+    return chips
+
+
 def home(request):
     return redirect("news:item_list")
 
@@ -265,6 +320,7 @@ def item_list(request):
             empty_state = "no_items"
 
     headline_sections = _home_headline_sections() if not has_filter_params else []
+    active_filter_chips = _active_filter_chips(request, form)
     seo = _seo_context(
         request,
         canonical_url=_absolute_url(request, "news:item_list"),
@@ -283,6 +339,7 @@ def item_list(request):
             "favorites_active": favorites_active,
             "has_filter_params": has_filter_params,
             "headline_sections": headline_sections,
+            "active_filter_chips": active_filter_chips,
             **seo,
         },
     )
@@ -421,12 +478,17 @@ def issue_detail(request, pk: int):
     )
     official_count = sum(1 for link in links if link.news_item.trust_label == "official")
     rumor_count = sum(1 for link in links if link.news_item.trust_label == "rumor")
+    core_relations = {IssueRelation.SAME_STORY, IssueRelation.FOLLOWUP, IssueRelation.CONFIRMATION, IssueRelation.DEBUNK}
+    core_links = [link for link in links if link.relation in core_relations]
+    related_links = [link for link in links if link.relation == IssueRelation.RELATED]
     return render(
         request,
         "news/issue_detail.html",
         {
             "issue": issue,
             "links": links,
+            "core_links": core_links,
+            "related_links": related_links,
             "item_count": len(links),
             "official_count": official_count,
             "rumor_count": rumor_count,
@@ -447,11 +509,13 @@ def source_list(request):
     for source in sources:
         source.public_last_error = _sanitize_public_error(source.last_error)
         source.status_info = _source_status(source)
+    source_groups = _group_sources(list(sources))
     return render(
         request,
         "news/source_list.html",
         {
             "sources": sources,
+            "source_groups": source_groups,
             **_seo_context(
                 request,
                 canonical_url=_absolute_url(request, "news:source_list"),
@@ -490,11 +554,13 @@ def source_health(request):
     for source in sources:
         source.public_last_error = _sanitize_public_error(source.last_error)
         source.status_info = _source_status(source)
+    source_groups = _group_sources(list(sources))
     return render(
         request,
         "news/source_health.html",
         {
             "sources": sources,
+            "source_groups": source_groups,
             "totals": totals,
             "backup_status": _backup_status(),
             **_seo_context(

@@ -154,6 +154,34 @@ class Source(models.Model):
             TrustType.UNKNOWN: "미확인",
         }.get(self.trust_type, "미확인")
 
+    @property
+    def source_group_key(self) -> str:
+        if self.trust_type == TrustType.OFFICIAL:
+            return "official"
+        if self.trust_type == TrustType.PRESS:
+            return "press"
+        if self.trust_type == TrustType.RUMOR:
+            return "rumor"
+        return "other"
+
+    @property
+    def source_group_ko(self) -> str:
+        return {
+            "official": "공식 소스",
+            "press": "전문 매체",
+            "rumor": "루머 소스",
+            "other": "기타 출처",
+        }.get(self.source_group_key, "기타 출처")
+
+    @property
+    def source_group_description(self) -> str:
+        return {
+            "official": "Nintendo 공식 채널과 지역별 공식 페이지입니다.",
+            "press": "전문 매체 보도입니다. 공식 발표와 별도로 해석/취재가 포함될 수 있습니다.",
+            "rumor": "공식 확인 전인 루머/유출성 출처입니다. 사실 여부를 별도로 확인해야 합니다.",
+            "other": "성격이 명확히 분류되지 않은 출처입니다.",
+        }.get(self.source_group_key, "성격이 명확히 분류되지 않은 출처입니다.")
+
 
 class RawItem(models.Model):
     source = models.ForeignKey(Source, on_delete=models.CASCADE, related_name="raw_items")

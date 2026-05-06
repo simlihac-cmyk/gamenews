@@ -54,7 +54,8 @@
       <span>날짜 신뢰도: {{ item.date_confidence }}{% if item.is_date_suspect %} · {{ item.date_suspect_reason }}{% endif %}</span>
       <span>표준 URL: {{ item.canonical_url|default:"없음" }}</span>
       <span>원출처: {{ item.raw_item.metadata.original_source|default:"원출처 확인 필요" }}</span>
-      <span>수집 출처: {{ item.source.name }}</span>
+      <span>전달/표시 출처: {{ item.raw_item.metadata.display_source|default:item.source.name }}</span>
+      <span>수집 출처: {{ item.raw_item.metadata.collection_source|default:item.source.name }}</span>
     </div>
   </section>
 </div>

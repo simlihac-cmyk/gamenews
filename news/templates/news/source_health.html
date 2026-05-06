@@ -69,7 +69,14 @@
     </tr>
   </thead>
   <tbody>
-    {% for source in sources %}
+    {% for group in source_groups %}
+      <tr>
+        <td colspan="8">
+          <strong>{{ group.label }}</strong>
+          <span class="muted"> · {{ group.description }}</span>
+        </td>
+      </tr>
+      {% for source in group.sources %}
       <tr>
         <td>
           <strong>{{ source.name }}</strong><br>
@@ -86,6 +93,7 @@
         <td>{{ source.last_new_items_count }}</td>
         <td>{{ source.public_last_error|default:"-" }}</td>
       </tr>
+      {% endfor %}
     {% empty %}
       <tr><td colspan="8">출처가 없습니다.</td></tr>
     {% endfor %}

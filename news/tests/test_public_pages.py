@@ -227,3 +227,42 @@ class PublicPageSecurityAndSeoTests(TestCase):
         self.assertContains(response, 'autocomplete="current-password"')
         self.assertContains(response, reverse("news:privacy"))
         self.assertContains(response, reverse("news:terms"))
+
+    def test_source_pages_and_filter_group_sources(self):
+        Source.objects.create(
+            name="Nintendo Life",
+            slug="nintendo-life",
+            url="https://example.com/feed",
+            source_type=SourceType.RSS,
+            trust_type=TrustType.PRESS,
+        )
+        Source.objects.create(
+            name="GamingLeaksAndRumours Reddit RSS",
+            slug="gaming-leaks",
+            url="https://example.com/rss",
+            source_type=SourceType.REDDIT_RSS,
+            trust_type=TrustType.RUMOR,
+        )
+
+        source_page = self.client.get(reverse("news:source_list"))
+        self.assertContains(source_page, "공식 소스")
+        self.assertContains(source_page, "전문 매체")
+        self.assertContains(source_page, "루머 소스")
+        self.assertContains(source_page, "공식 확인 전인 루머/유출성 출처입니다")
+
+        item_page = self.client.get(reverse("news:item_list"))
+        self.assertContains(item_page, '<optgroup label="공식 소스">', html=False)
+        self.assertContains(item_page, '<optgroup label="전문 매체">', html=False)
+        self.assertContains(item_page, '<optgroup label="루머 소스">', html=False)
+
+    def test_active_filter_chips_and_filter_accessibility(self):
+        self.make_item("Zelda release date announced")
+
+        response = self.client.get(reverse("news:item_list"), {"q": "Zelda", "min_importance": "80"})
+
+        self.assertContains(response, 'role="search"')
+        self.assertContains(response, "<fieldset", html=False)
+        self.assertContains(response, "활성 필터")
+        self.assertContains(response, "검색: Zelda")
+        self.assertContains(response, "중요도 80+")
+        self.assertContains(response, "로그인하면 읽음, 북마크, 관심 프랜차이즈를 저장할 수 있습니다.")

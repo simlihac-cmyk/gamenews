@@ -26,7 +26,14 @@
     </tr>
   </thead>
   <tbody>
-    {% for source in sources %}
+    {% for group in source_groups %}
+      <tr>
+        <td colspan="13">
+          <strong>{{ group.label }}</strong>
+          <span class="muted"> · {{ group.description }}</span>
+        </td>
+      </tr>
+      {% for source in group.sources %}
       <tr>
         <td>
           <strong>{{ source.name }}</strong><br>
@@ -52,6 +59,7 @@
           {% endif %}
         </td>
       </tr>
+      {% endfor %}
     {% empty %}
       <tr><td colspan="13">출처가 없습니다.</td></tr>
     {% endfor %}

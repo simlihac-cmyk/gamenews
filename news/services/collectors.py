@@ -4,6 +4,7 @@ import calendar
 import difflib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta, timezone as datetime_timezone
@@ -539,6 +540,7 @@ def _payload_from_feed_entry(source: Source, entry) -> dict[str, Any]:
         "feed_id": entry.get("id") or entry.get("guid", ""),
         "tags": [tag.get("term") for tag in entry.get("tags", []) if tag.get("term")],
         "thumbnail_url": _entry_thumbnail(entry),
+        **_source_lineage_metadata(source, title=title, url=link),
     }
     return {
         "source": source,
@@ -561,6 +563,40 @@ def _entry_link(entry) -> str:
         if link.get("rel") in {"alternate", None} and link.get("href"):
             return link["href"]
     return entry.get("id") or entry.get("guid", "")
+
+
+def _source_lineage_metadata(source: Source, *, title: str, url: str) -> dict[str, str]:
+    original_source = _infer_original_source(source, title=title, url=url)
+    return {
+        "original_source": original_source or "",
+        "display_source": original_source or source.name,
+        "collection_source": source.name,
+    }
+
+
+def _infer_original_source(source: Source, *, title: str, url: str) -> str:
+    if source.source_type != SourceType.REDDIT_RSS:
+        return source.name
+    candidates = [
+        "Bloomberg",
+        "Reuters",
+        "Nikkei",
+        "Famitsu",
+        "VGC",
+        "Nintendo Life",
+        "Gematsu",
+        "IGN",
+        "Eurogamer",
+    ]
+    for candidate in candidates:
+        if re.search(rf"(?<![A-Za-z0-9]){re.escape(candidate)}(?![A-Za-z0-9])", title, flags=re.IGNORECASE):
+            return candidate
+    prefix = re.match(r"^\s*\[?([A-Z][A-Za-z0-9 &.'-]{2,40})\]?\s*[:\-–—|]", title)
+    if prefix:
+        value = normalize_whitespace(prefix.group(1))
+        if value.casefold() not in {"rumor", "leak", "nintendo", "switch"}:
+            return value
+    return ""
 
 
 def _html_payloads_from_selectors(source: Source, soup: BeautifulSoup, page_html: str) -> list[dict[str, Any]]:
@@ -606,6 +642,7 @@ def _html_payloads_from_selectors(source: Source, soup: BeautifulSoup, page_html
                     "page_url": source.url,
                     "thumbnail_url": thumbnail_url,
                     "page_html_excerpt": page_html[:500],
+                    **_source_lineage_metadata(source, title=title, url=url),
                 },
             }
         )
@@ -648,6 +685,7 @@ def _html_payloads_generic(source: Source, soup: BeautifulSoup, page_html: str) 
                     "page_url": source.url,
                     "thumbnail_url": thumbnail_url,
                     "page_html_excerpt": page_html[:500],
+                    **_source_lineage_metadata(source, title=title, url=url),
                 },
             }
         )
@@ -712,6 +750,7 @@ def _html_payloads_from_embedded_json(source: Source, soup: BeautifulSoup, page_
                     "json_type": item_type or "",
                     "page_url": source.url,
                     "page_html_excerpt": page_html[:500],
+                    **_source_lineage_metadata(source, title=title, url=url),
                 },
             }
         )

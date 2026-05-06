@@ -59,5 +59,24 @@ class NewsItemFilterForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.fields["source"].queryset = Source.objects.order_by("name")
         self.fields["source"].empty_label = "출처 전체"
+        self.fields["source"].choices = _grouped_source_choices(self.fields["source"].queryset)
         self.fields["franchise"].queryset = Franchise.objects.order_by("name")
         self.fields["franchise"].empty_label = "프랜차이즈 전체"
+
+
+def _grouped_source_choices(queryset):
+    groups = [
+        ("official", "공식 소스"),
+        ("press", "전문 매체"),
+        ("rumor", "루머 소스"),
+        ("other", "기타 출처"),
+    ]
+    sources_by_group = {key: [] for key, _label in groups}
+    for source in queryset:
+        sources_by_group.setdefault(source.source_group_key, []).append((str(source.pk), source.name))
+    choices = [("", "출처 전체")]
+    for key, label in groups:
+        source_choices = sources_by_group.get(key) or []
+        if source_choices:
+            choices.append((label, source_choices))
+    return choices

@@ -106,6 +106,35 @@ class CollectorHttpTests(TestCase):
         self.assertEqual(result.created_count, 1)
         self.assertEqual(RawItem.objects.get().source, source)
 
+    def test_reddit_rss_extracts_original_source_lineage_when_visible(self):
+        body = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>Bloomberg: Switch 2 pricing report surfaces</title>
+              <link>https://www.reddit.com/r/GamingLeaksAndRumours/comments/abc/report</link>
+              <pubDate>Wed, 06 May 2026 10:00:00 GMT</pubDate>
+              <description>A rumor discussion.</description>
+            </item>
+          </channel>
+        </rss>
+        """
+        source = Source.objects.create(
+            name="GamingLeaksAndRumours Reddit RSS",
+            slug="gaming-leaks-rumours-reddit",
+            url="https://www.reddit.com/r/GamingLeaksAndRumours/search.rss?q=Nintendo",
+            source_type=SourceType.REDDIT_RSS,
+            trust_type=TrustType.RUMOR,
+        )
+
+        with patch("news.services.collectors.httpx.get", return_value=response_for(source.url, body)):
+            collect_source(source)
+
+        raw = RawItem.objects.get()
+        self.assertEqual(raw.metadata["original_source"], "Bloomberg")
+        self.assertEqual(raw.metadata["display_source"], "Bloomberg")
+        self.assertEqual(raw.metadata["collection_source"], "GamingLeaksAndRumours Reddit RSS")
+
     def test_html_selector_config_extracts_item_fields(self):
         html = """
         <html><body>
