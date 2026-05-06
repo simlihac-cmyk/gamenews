@@ -1,0 +1,39 @@
+{% extends "news/base.html" %}
+{% block title %}이슈 - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>이슈</h1>
+    <div class="muted">총 {{ total_count }}개 · 루머부터 공식 확인까지 이어지는 흐름</div>
+  </div>
+</div>
+<div class="stack">
+  {% for issue in page.object_list %}
+    <article class="card">
+      <div class="badge-row">
+        <span class="badge {{ issue.status }}">{{ issue.status_ko }}</span>
+        <span class="badge">신뢰도 {{ issue.confidence_score }}</span>
+        <span class="badge">항목 {{ issue.item_count }}</span>
+      </div>
+      <h2 class="item-title"><a href="{% url 'news:issue_detail' issue.pk %}">{{ issue.title }}</a></h2>
+      <div class="meta">
+        <span>최초: {{ issue.first_seen_at|date:"Y-m-d H:i" }}</span>
+        <span>갱신: {{ issue.last_updated_at|date:"Y-m-d H:i" }}</span>
+        {% if issue.official_confirmed_at %}<span>공식 확인: {{ issue.official_confirmed_at|date:"Y-m-d H:i" }}</span>{% endif %}
+      </div>
+      <div class="button-row" style="margin-top: 12px;">
+        <a class="btn" href="{% url 'news:issue_detail' issue.pk %}">타임라인 보기</a>
+      </div>
+    </article>
+  {% empty %}
+    <div class="card">이슈가 없습니다.</div>
+  {% endfor %}
+</div>
+{% if page.has_other_pages %}
+  <div class="pagination">
+    {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">이전</a>{% endif %}
+    <span class="btn">{{ page.number }} / {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">다음</a>{% endif %}
+  </div>
+{% endif %}
+{% endblock %}

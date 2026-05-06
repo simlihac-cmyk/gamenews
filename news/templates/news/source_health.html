@@ -1,0 +1,69 @@
+{% extends "news/base.html" %}
+{% block title %}상태 - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>상태</h1>
+    <div class="muted">수집원별 최근 fetch 상태와 오류 확인</div>
+  </div>
+</div>
+<div class="stat-grid">
+  <div class="stat-card">
+    <strong>{{ totals.enabled }}</strong>
+    <span>활성 출처</span>
+  </div>
+  <div class="stat-card">
+    <strong>{{ totals.errors }}</strong>
+    <span>오류 출처</span>
+  </div>
+  <div class="stat-card">
+    <strong>{{ totals.last_new }}</strong>
+    <span>최근 신규</span>
+  </div>
+  <div class="stat-card">
+    <strong>{{ totals.items }}</strong>
+    <span>전체 뉴스</span>
+  </div>
+</div>
+<table class="table">
+  <thead>
+    <tr>
+      <th>출처</th>
+      <th>상태</th>
+      <th>마지막 확인</th>
+      <th>마지막 성공</th>
+      <th>원본</th>
+      <th>뉴스</th>
+      <th>최근 신규</th>
+      <th>오류</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for source in sources %}
+      <tr>
+        <td>
+          <strong>{{ source.name }}</strong><br>
+          <span class="muted">{{ source.source_type }} · {{ source.trust_type_ko }} · {% if source.enabled %}활성{% else %}비활성{% endif %}</span>
+        </td>
+        <td>
+          {% if source.last_error %}
+            <span class="health-error">오류</span>
+          {% elif source.last_success_at %}
+            <span class="health-ok">정상</span>
+          {% else %}
+            <span class="muted">대기</span>
+          {% endif %}
+        </td>
+        <td>{{ source.last_checked_at|date:"Y-m-d H:i"|default:"없음" }}</td>
+        <td>{{ source.last_success_at|date:"Y-m-d H:i"|default:"없음" }}</td>
+        <td>{{ source.raw_count }}</td>
+        <td>{{ source.item_count }}</td>
+        <td>{{ source.last_new_items_count }}</td>
+        <td>{{ source.last_error|default:"-"|truncatechars:180 }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8">출처가 없습니다.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

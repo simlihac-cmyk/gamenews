@@ -1,0 +1,29 @@
+{% extends "news/base.html" %}
+{% block title %}프랜차이즈 - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>프랜차이즈</h1>
+    <div class="muted">별칭 매칭으로 연결된 항목</div>
+  </div>
+</div>
+<div class="stack">
+  {% for franchise in franchises %}
+    <article class="card">
+      <div class="badge-row">
+        <span class="badge">우선순위 {{ franchise.priority }}</span>
+        <span class="badge">항목 {{ franchise.item_count }}</span>
+      </div>
+      <h2 class="item-title"><a href="{% url 'news:franchise_detail' franchise.slug %}">{{ franchise.name }}</a></h2>
+      <div class="meta">
+        {% for alias in franchise.aliases %}
+          <span>{{ alias }}</span>
+        {% endfor %}
+      </div>
+    </article>
+  {% empty %}
+    <div class="card">프랜차이즈가 없습니다.</div>
+  {% endfor %}
+</div>
+{% endblock %}
+

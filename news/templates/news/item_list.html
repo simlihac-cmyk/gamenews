@@ -1,0 +1,140 @@
+{% extends "news/base.html" %}
+{% load news_extras %}
+{% block title %}타임라인 - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>타임라인</h1>
+    <div class="muted">총 {{ total_count }}개 · 최신 닌텐도 뉴스, 보도, 루머를 빠르게 훑어보기</div>
+  </div>
+</div>
+
+<div class="quick-tabs">
+  <a href="{% url 'news:item_list' %}">전체</a>
+  <a href="{% url 'news:item_list' %}?trust_label=official">공식</a>
+  <a href="{% url 'news:item_list' %}?trust_label=reported">보도</a>
+  <a href="{% url 'news:item_list' %}?trust_label=rumor">루머</a>
+  <a href="{% url 'news:item_list' %}?category=direct">Direct</a>
+  <a href="{% url 'news:item_list' %}?category=release_date">발매일</a>
+  <a href="{% url 'news:item_list' %}?category=trailer">트레일러</a>
+  <a href="{% url 'news:item_list' %}?q=Switch+2">Switch 2</a>
+  <a href="{% url 'news:item_list' %}?favorites_only=on">관심작만 보기</a>
+</div>
+
+<form method="get" class="filter">
+  <div class="span-2">
+    <label for="{{ form.q.id_for_label }}">검색</label>
+    {{ form.q }}
+  </div>
+  <div>
+    <label for="{{ form.trust_label.id_for_label }}">신뢰도</label>
+    {{ form.trust_label }}
+  </div>
+  <div>
+    <label for="{{ form.category.id_for_label }}">카테고리</label>
+    {{ form.category }}
+  </div>
+  <div>
+    <label for="{{ form.source.id_for_label }}">출처</label>
+    {{ form.source }}
+  </div>
+  <div>
+    <label for="{{ form.franchise.id_for_label }}">프랜차이즈</label>
+    {{ form.franchise }}
+  </div>
+  <div>
+    <label for="{{ form.is_read.id_for_label }}">읽음</label>
+    {{ form.is_read }}
+  </div>
+  <div>
+    <label for="{{ form.is_bookmarked.id_for_label }}">북마크</label>
+    {{ form.is_bookmarked }}
+  </div>
+  <div>
+    <label for="{{ form.min_importance.id_for_label }}">최소 중요도</label>
+    {{ form.min_importance }}
+  </div>
+  <div>
+    <label>관심작</label>
+    <label class="checkline" for="{{ form.favorites_only.id_for_label }}">
+      {{ form.favorites_only }}
+      관심작만 보기
+    </label>
+  </div>
+  <div>
+    <label for="{{ form.date_from.id_for_label }}">시작일</label>
+    {{ form.date_from }}
+  </div>
+  <div>
+    <label for="{{ form.date_to.id_for_label }}">종료일</label>
+    {{ form.date_to }}
+  </div>
+  <div class="filter-actions">
+    <button class="btn-primary" type="submit">적용</button>
+    <a class="btn" href="{% url 'news:item_list' %}">초기화</a>
+  </div>
+</form>
+
+<div class="stack">
+  {% for item in page.object_list %}
+    <article class="card timeline-card {{ item.trust_label }}{% if item.is_read %} is-read{% endif %}">
+      <div class="item-main">
+        <div class="badge-row">
+          <span class="badge {{ item.trust_label }}">{{ item.trust_label_ko }}</span>
+          <span class="badge {{ item.category|category_class }}">{{ item.category_ko }}</span>
+          {% for tag in item.detected_tags %}
+            {% if tag == "direct" or tag == "release_date" or tag == "trailer" or tag == "switch2" %}
+              <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>
+            {% endif %}
+          {% endfor %}
+          {% if item.is_bookmarked %}<span class="badge reported">관심작</span>{% endif %}
+          {% if item.is_read %}<span class="badge state">읽음</span>{% endif %}
+        </div>
+        <h2 class="item-title"><a href="{% url 'news:item_detail' item.pk %}">{{ item.title }}</a></h2>
+        <p class="summary compact">{{ item.summary_ko }}</p>
+        <div class="meta">
+          <span>{{ item.source.name }}</span>
+          <span>게시 {{ item.published_at|date:"Y-m-d H:i"|default:"미상" }}</span>
+          <span>감지 {{ item.first_seen_at|date:"Y-m-d H:i" }}</span>
+        </div>
+        {% if item.franchise_links.all %}
+          <div class="franchise-row">
+            {% for link in item.franchise_links.all %}
+              <a class="badge" href="{% url 'news:franchise_detail' link.franchise.slug %}">{{ link.franchise.name }}</a>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+      <div class="item-side">
+        <div class="score-box">
+          <div>
+            <strong>{{ item.importance_score }}</strong>
+            <span>중요도</span>
+          </div>
+        </div>
+        <div class="card-actions">
+          <a class="btn" href="{% url 'news:item_detail' item.pk %}">상세</a>
+          <a class="btn" href="{{ item.url }}" target="_blank" rel="noopener">원문</a>
+          <form method="post" action="{% url 'news:mark_read' item.pk %}">{% csrf_token %}<button class="btn-quiet" type="submit">읽음</button></form>
+          <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}관심 해제{% else %}관심{% endif %}</button></form>
+          <form method="post" action="{% url 'news:archive_item' item.pk %}">{% csrf_token %}<button class="btn-danger" type="submit">보관</button></form>
+        </div>
+      </div>
+    </article>
+  {% empty %}
+    <div class="card">아직 수집된 항목이 없습니다.</div>
+  {% endfor %}
+</div>
+
+{% if page.has_other_pages %}
+  <div class="pagination">
+    {% if page.has_previous %}
+      <a class="btn" href="?{% if query_params %}{{ query_params }}&{% endif %}page={{ page.previous_page_number }}">이전</a>
+    {% endif %}
+    <span class="btn btn-quiet">{{ page.number }} / {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}
+      <a class="btn" href="?{% if query_params %}{{ query_params }}&{% endif %}page={{ page.next_page_number }}">다음</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,75 @@
+{% extends "news/base.html" %}
+{% load news_extras %}
+{% block title %}{{ item.title }} - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="badge-row">
+      <span class="badge {{ item.trust_label }}">{{ item.trust_label_ko }}</span>
+      <span class="badge {{ item.category|category_class }}">{{ item.category_ko }}</span>
+      <span class="badge">중요도 {{ item.importance_score }}</span>
+    </div>
+    <h1 style="margin-top: 10px;">{{ item.title }}</h1>
+    <div class="muted">{{ item.source.name }} · 감지 {{ item.first_seen_at|date:"Y-m-d H:i" }}</div>
+  </div>
+  <div class="button-row">
+    <a class="btn" href="{{ item.url }}" target="_blank" rel="noopener">원문</a>
+    <form method="post" action="{% url 'news:mark_read' item.pk %}">{% csrf_token %}<button type="submit">읽음</button></form>
+    <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}북마크 해제{% else %}북마크{% endif %}</button></form>
+    <form method="post" action="{% url 'news:recalculate_item' item.pk %}">{% csrf_token %}<button type="submit">재계산</button></form>
+  </div>
+</div>
+
+<div class="grid-2">
+  <section class="card">
+    <h2>요약</h2>
+    <p class="summary">{{ item.summary_ko }}</p>
+    <div class="badge-row">
+      {% for tag in item.detected_tags %}
+        <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>
+      {% endfor %}
+      {% for link in item.franchise_links.all %}
+        <a class="badge reported" href="{% url 'news:franchise_detail' link.franchise.slug %}">{{ link.franchise.name }}</a>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="card">
+    <h2>메타데이터</h2>
+    <div class="meta">
+      <span>게시: {{ item.published_at|date:"Y-m-d H:i"|default:"미상" }}</span>
+      <span>지역: {{ item.region }}</span>
+      <span>언어: {{ item.language }}</span>
+      <span>신뢰도 점수: {{ item.confidence_score }}</span>
+      <span>표준 URL: {{ item.canonical_url|default:"없음" }}</span>
+    </div>
+  </section>
+</div>
+
+<section class="card" style="margin-top: 14px;">
+  <h2>연결된 이슈</h2>
+  {% if issue_link %}
+    <p><a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title }}</a> · {{ issue_link.issue.status_ko }} · {{ issue_link.get_relation_display }}</p>
+  {% else %}
+    <p class="muted">연결된 이슈가 없습니다.</p>
+  {% endif %}
+</section>
+
+<section class="card" style="margin-top: 14px;">
+  <h2>같은 이슈의 항목</h2>
+  <div class="stack">
+    {% for related in related_items %}
+      <div>
+        <a href="{% url 'news:item_detail' related.pk %}">{{ related.title }}</a>
+        <span class="muted"> · {{ related.source.name }} · {{ related.first_seen_at|date:"Y-m-d H:i" }}</span>
+      </div>
+    {% empty %}
+      <div class="muted">관련 항목이 없습니다.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card" style="margin-top: 14px;">
+  <h2>원문 발췌</h2>
+  <div class="pre">{{ item.raw_item.raw_text|truncatechars:5000 }}</div>
+</section>
+{% endblock %}

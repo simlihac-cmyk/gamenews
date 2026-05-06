@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from news.models import Franchise, NewsCategory, Source, TrustLabel, TrustType
+
+from .text import normalize_title
+
+
+@dataclass(frozen=True)
+class ClassificationResult:
+    trust_label: str
+    category: str
+    tags: list[str]
+    confidence_score: int
+
+
+KEYWORDS = {
+    "direct": ["nintendo direct", "direct", "닌텐도 다이렉트", "ニンテンドーダイレクト"],
+    "release_date": ["release date", "launch date", "발매일", "출시일", "発売日"],
+    "trailer": ["trailer", "트레일러", "pv", "영상 공개"],
+    "new_game": ["announced", "reveal", "revealed", "unveiled", "신작", "발표", "공개"],
+    "rumor": ["rumor", "rumour", "insider", "reportedly", "루머", "미확인"],
+    "leak": ["leak", "leaked", "유출"],
+    "sale": ["sale", "discount", "eshop sale", "세일", "할인"],
+    "update": ["update", "patch", "dlc", "업데이트", "패치"],
+    "switch2": ["switch2", "switch 2", "nintendo switch 2", "차세대기"],
+    "switch": ["switch", "nintendo switch", "닌텐도 스위치"],
+}
+
+CATEGORY_PRIORITY = [
+    "direct",
+    "release_date",
+    "trailer",
+    "new_game",
+    "leak",
+    "rumor",
+    "sale",
+    "update",
+]
+
+
+def classify_item(source: Source, title: str, raw_text: str = "") -> ClassificationResult:
+    trust_label = classify_trust_label(source)
+    combined = f"{title} {raw_text}".lower()
+    normalized = normalize_title(combined)
+    tags = detect_tags(combined, normalized)
+
+    category = NewsCategory.GENERAL
+    for candidate in CATEGORY_PRIORITY:
+        if candidate in tags:
+            category = candidate
+            break
+    if category == NewsCategory.GENERAL:
+        if trust_label == TrustLabel.OFFICIAL:
+            category = NewsCategory.OFFICIAL
+        elif trust_label == TrustLabel.RUMOR:
+            category = NewsCategory.RUMOR
+
+    confidence = {
+        TrustLabel.OFFICIAL: 90,
+        TrustLabel.REPORTED: 70,
+        TrustLabel.RUMOR: 45,
+        TrustLabel.UNKNOWN: 35,
+    }.get(trust_label, 35)
+    if tags:
+        confidence = min(100, confidence + min(len(tags) * 3, 10))
+
+    return ClassificationResult(
+        trust_label=trust_label,
+        category=category,
+        tags=tags,
+        confidence_score=confidence,
+    )
+
+
+def classify_trust_label(source: Source) -> str:
+    if source.trust_type == TrustType.OFFICIAL:
+        return TrustLabel.OFFICIAL
+    if source.trust_type == TrustType.PRESS:
+        return TrustLabel.REPORTED
+    if source.trust_type == TrustType.RUMOR:
+        return TrustLabel.RUMOR
+    return TrustLabel.UNKNOWN
+
+
+def detect_tags(lower_text: str, normalized_text: str | None = None) -> list[str]:
+    normalized_text = normalized_text or normalize_title(lower_text)
+    tags: list[str] = []
+    for tag, keywords in KEYWORDS.items():
+        for keyword in keywords:
+            if _keyword_matches(keyword, lower_text, normalized_text):
+                tags.append(tag)
+                break
+    return tags
+
+
+def _keyword_matches(keyword: str, lower_text: str, normalized_text: str) -> bool:
+    keyword_norm = normalize_title(keyword)
+    if not keyword_norm:
+        return False
+    if re.fullmatch(r"[a-z0-9 ]+", keyword_norm):
+        return bool(re.search(rf"(?<![a-z0-9]){re.escape(keyword_norm)}(?![a-z0-9])", normalized_text))
+    return keyword.lower() in lower_text or keyword_norm in normalized_text
+
+
+def detect_franchises(title: str, raw_text: str = "") -> list[Franchise]:
+    haystack = normalize_title(f"{title} {raw_text}")
+    matches: list[Franchise] = []
+    for franchise in Franchise.objects.order_by("-priority", "name"):
+        aliases = [franchise.name, *(franchise.aliases or [])]
+        if any(_alias_matches(haystack, alias) for alias in aliases):
+            matches.append(franchise)
+    return matches
+
+
+def _alias_matches(haystack: str, alias: str) -> bool:
+    needle = normalize_title(alias)
+    if not needle:
+        return False
+    if re.fullmatch(r"[a-z0-9 ]+", needle):
+        return bool(re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack))
+    return needle in haystack

@@ -1,0 +1,38 @@
+{% extends "news/base.html" %}
+{% block title %}{{ franchise.name }} - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ franchise.name }}</h1>
+    <div class="muted">
+      {% for alias in franchise.aliases %}{{ alias }}{% if not forloop.last %} · {% endif %}{% endfor %}
+    </div>
+  </div>
+</div>
+<div class="stack">
+  {% for item in page.object_list %}
+    <article class="card">
+      <div class="badge-row">
+        <span class="badge {{ item.trust_label }}">{{ item.trust_label_ko }}</span>
+        <span class="badge">{{ item.category_ko }}</span>
+        <span class="badge">중요도 {{ item.importance_score }}</span>
+      </div>
+      <h2 class="item-title"><a href="{% url 'news:item_detail' item.pk %}">{{ item.title }}</a></h2>
+      <p class="summary">{{ item.summary_ko }}</p>
+      <div class="meta">
+        <span>{{ item.source.name }}</span>
+        <span>{{ item.first_seen_at|date:"Y-m-d H:i" }}</span>
+      </div>
+    </article>
+  {% empty %}
+    <div class="card">연결된 뉴스가 없습니다.</div>
+  {% endfor %}
+</div>
+{% if page.has_other_pages %}
+  <div class="pagination">
+    {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">이전</a>{% endif %}
+    <span class="btn">{{ page.number }} / {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">다음</a>{% endif %}
+  </div>
+{% endif %}
+{% endblock %}

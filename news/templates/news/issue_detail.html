@@ -1,0 +1,55 @@
+{% extends "news/base.html" %}
+{% load news_extras %}
+{% block title %}{{ issue.title }} - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="badge-row">
+      <span class="badge {{ issue.status }}">{{ issue.status_ko }}</span>
+      <span class="badge">신뢰도 {{ issue.confidence_score }}</span>
+    </div>
+    <h1 style="margin-top: 10px;">{{ issue.title }}</h1>
+    <div class="muted">최초 {{ issue.first_seen_at|date:"Y-m-d H:i" }} · 갱신 {{ issue.last_updated_at|date:"Y-m-d H:i" }}</div>
+  </div>
+</div>
+{% if issue.official_confirmed_at %}
+  <section class="card" style="margin-bottom: 14px;">
+    공식 확인: {{ issue.official_confirmed_at|date:"Y-m-d H:i" }}
+  </section>
+{% endif %}
+<div class="issue-timeline">
+  {% for link in links %}
+    <div class="timeline-entry {{ link.news_item.trust_label }}">
+      <div class="timeline-dot">{{ forloop.revcounter }}</div>
+      <div class="card">
+        <div class="badge-row">
+          <span class="badge {{ link.news_item.trust_label }}">{{ link.news_item.trust_label_ko }}</span>
+          <span class="badge {{ link.news_item.category|category_class }}">{{ link.news_item.category_ko }}</span>
+          <span class="badge">{{ link.get_relation_display }}</span>
+          {% for tag in link.news_item.detected_tags %}
+            {% if tag == "direct" or tag == "release_date" or tag == "trailer" or tag == "switch2" %}
+              <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <h2 class="item-title"><a href="{% url 'news:item_detail' link.news_item.pk %}">{{ link.news_item.title }}</a></h2>
+        <p class="summary compact">{{ link.news_item.summary_ko }}</p>
+        <div class="meta">
+          <span>{{ link.news_item.source.name }}</span>
+          <span>{{ link.news_item.first_seen_at|date:"Y-m-d H:i" }}</span>
+          <span>중요도 {{ link.news_item.importance_score }}</span>
+          {% for franchise_link in link.news_item.franchise_links.all %}
+            <span>{{ franchise_link.franchise.name }}</span>
+          {% endfor %}
+        </div>
+        <div class="button-row" style="margin-top: 12px;">
+          <a class="btn" href="{% url 'news:item_detail' link.news_item.pk %}">상세</a>
+          <a class="btn" href="{{ link.news_item.url }}" target="_blank" rel="noopener">원문</a>
+        </div>
+      </div>
+    </div>
+  {% empty %}
+    <div class="card">연결된 항목이 없습니다.</div>
+  {% endfor %}
+</div>
+{% endblock %}
