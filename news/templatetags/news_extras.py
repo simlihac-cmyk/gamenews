@@ -1,5 +1,7 @@
 from django import template
+from django.utils import timezone
 
+from news.models import PublishedAtPrecision, SourceType
 from news.services.quality import is_generic_summary
 
 register = template.Library()
@@ -40,7 +42,10 @@ RELATION_LABELS = {
     "same_story": "같은 이야기",
     "followup": "후속",
     "confirmation": "공식 확인",
+    "official_confirmation": "공식 확인",
     "debunk": "반박",
+    "contradicts": "반박/정정",
+    "source_duplicate": "중복 출처",
     "related": "관련",
 }
 
@@ -75,19 +80,25 @@ def item_badges(item):
     badges: list[dict[str, str]] = []
 
     def add(label: str, css_class: str = "") -> None:
+        css = " ".join(dict.fromkeys(str(css_class or "").split()))
         key = label.casefold()
         if not label or any(existing["label"].casefold() == key for existing in badges):
             return
-        badges.append({"label": label, "class": css_class})
+        badges.append({"label": label, "class": css})
 
+    issue_links = list(getattr(item, "issue_links", []).all()) if hasattr(getattr(item, "issue_links", None), "all") else []
+    if any(getattr(link.issue, "review_required", False) for link in issue_links if getattr(link, "issue", None)):
+        add("검토 필요", "state")
     if item.importance_score >= 80:
         add("중요", "important")
-    add("공식 출처" if item.trust_label == "official" else item.trust_label_ko, item.trust_label)
+    add(item.trust_label_ko, item.trust_label)
     if item.category not in {"official", "general"}:
         add(item.category_ko, category_class(item.category))
     for tag in item.detected_tags:
         if tag in {"direct", "release_date", "trailer", "switch2"}:
             add(tag_label(tag), tag_class(tag))
+    if getattr(item, "title_suspect", False):
+        add("제목 확인 필요", "state")
     if getattr(item, "is_date_suspect", False):
         add("날짜 확인 필요", "state")
     if item.is_backfill:
@@ -99,3 +110,43 @@ def item_badges(item):
     if item.is_read:
         add("읽음", "state")
     return badges
+
+
+@register.simple_tag
+def published_status(item) -> str:
+    if getattr(item, "is_date_suspect", False):
+        reason = getattr(item, "date_suspect_reason", "")
+        return f"게시: 확인 필요 · {reason}" if reason else "게시: 확인 필요"
+    if not getattr(item, "published_at", None):
+        return "게시: 미상 · 수집일 기준 정렬"
+    published = timezone.localtime(item.published_at).strftime("%Y-%m-%d %H:%M")
+    if getattr(item, "published_at_precision", "") == PublishedAtPrecision.DATE_ONLY:
+        return f"게시: {published} KST · 날짜만 확인됨"
+    if getattr(item, "date_confidence", "") == "medium":
+        return f"게시: {published} KST · 추정 날짜"
+    return f"게시: {published} KST"
+
+
+@register.simple_tag
+def source_attribution(item):
+    metadata = getattr(getattr(item, "raw_item", None), "metadata", {}) or {}
+    source = item.source
+    original = metadata.get("original_source") or ""
+    display = metadata.get("display_source") or source.name
+    transfer = metadata.get("transfer_source") or ""
+    collection = metadata.get("collection_source") or source.name
+    rows: list[dict[str, str]] = []
+
+    if source.trust_type == "official":
+        rows.append({"label": "원출처", "value": original or source.name})
+        rows.append({"label": "수집 출처", "value": collection})
+        return rows
+
+    rows.append({"label": "표시 출처", "value": display})
+    if source.source_type == SourceType.REDDIT_RSS or source.trust_type == "rumor":
+        rows.append({"label": "전달 출처", "value": transfer or "Reddit 게시물"})
+        rows.append({"label": "원출처", "value": original or "원출처 확인 필요"})
+    elif original:
+        rows.append({"label": "원출처", "value": original})
+    rows.append({"label": "수집 출처", "value": collection})
+    return rows

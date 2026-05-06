@@ -37,15 +37,18 @@ from news.models import (
 
 from .classifier import classify_item, detect_franchise_matches
 from .dedupe import content_hash_for, find_existing_news_item, find_existing_raw_item
-from .importance import calculate_importance_with_reasons
+from .importance import calculate_importance_with_reasons, calculate_nintendo_relevance
+from .issues import rebuild_issue_title, refresh_issue_review_status
 from .quality import (
     LOW_CONFIDENCE_THRESHOLD,
     article_rejection_reason,
-    clean_title,
+    classify_content_type,
     date_quality_update_fields,
     extraction_confidence_for,
     is_backfill_item,
     precision_for_datetime,
+    summary_quality_fallback,
+    title_quality,
 )
 from .source_adapters import adapter_config
 from .summarizer import summarize_item
@@ -131,6 +134,7 @@ class IssueMatch:
     relation: str
     confidence: float
     explanation: str
+    decision_debug: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -373,11 +377,18 @@ def collect_html(source: Source, *, limit: int | None = None, dry_run: bool = Fa
 
 
 def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[NewsItem | None, bool]:
-    display_title = clean_title(raw_item.title, raw_item.source.slug) or raw_item.title
+    title_info = title_quality(raw_item.title, raw_item.source.slug)
+    display_title = title_info.cleaned or raw_item.title
     franchise_matches = detect_franchise_matches(display_title, raw_item.raw_text)
     primary_franchise_matches = [match for match in franchise_matches if match.is_primary]
     franchises = [match.franchise for match in primary_franchise_matches]
     date_quality = date_quality_update_fields(raw_item.published_at)
+    content_type = classify_content_type(
+        title=display_title,
+        url=raw_item.canonical_url or raw_item.url,
+        raw_text=raw_item.raw_text,
+        source=raw_item.source,
+    )
     confidence = extraction_confidence_for(
         title=raw_item.title,
         url=raw_item.canonical_url or raw_item.url,
@@ -444,14 +455,36 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
         return existing, False
 
     classification = classify_item(raw_item.source, display_title, raw_item.raw_text)
-    importance, importance_reasons = calculate_importance_with_reasons(
+    is_backfill = is_backfill_item(raw_item.published_at, raw_item.first_seen_at)
+    relevance = calculate_nintendo_relevance(
         source=raw_item.source,
         title=display_title,
         raw_text=raw_item.raw_text,
         tags=classification.tags,
         franchises=franchises,
     )
-    summary_ko = summarize_item(
+    importance, importance_reasons = calculate_importance_with_reasons(
+        source=raw_item.source,
+        title=display_title,
+        raw_text=raw_item.raw_text,
+        tags=classification.tags,
+        franchises=franchises,
+        published_at=raw_item.published_at,
+        first_seen_at=raw_item.first_seen_at,
+        content_type=content_type,
+        title_suspect=title_info.is_suspect,
+        date_confidence=str(date_quality["date_confidence"]),
+        nintendo_relevance_score=relevance,
+    )
+    if importance > 0 and not importance_reasons:
+        importance_reasons = ["자동 중요도 계산 기준"]
+    if classification.confidence_score > 0 and not classification.trust_reasons:
+        classification.trust_reasons.append("출처 기준 신뢰도 계산")
+    summary_ko = summary_quality_fallback(
+        trust_label=classification.trust_label,
+        content_type=content_type,
+        title_suspect=title_info.is_suspect,
+    ) or summarize_item(
         source=raw_item.source,
         title=display_title,
         raw_text=raw_item.raw_text,
@@ -468,6 +501,10 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
         "canonical_url_hash": raw_item.canonical_url_hash or create_url_hash(raw_item.canonical_url or ""),
         "summary_ko": summary_ko,
         "summary_original": truncate(raw_item.raw_text, 1500),
+        "title_suspect": title_info.is_suspect,
+        "title_suspect_reason": title_info.reason,
+        "content_type": content_type,
+        "nintendo_relevance_score": relevance,
         "trust_label": classification.trust_label,
         "category": classification.category,
         "detected_tags": classification.tags,
@@ -481,7 +518,7 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
         "published_at": raw_item.published_at,
         "published_at_precision": raw_item.published_at_precision,
         "first_seen_at": raw_item.first_seen_at,
-        "is_backfill": is_backfill_item(raw_item.published_at, raw_item.first_seen_at),
+        "is_backfill": is_backfill,
         "extraction_confidence": confidence,
         "thumbnail_url": thumbnail_url or "",
         "date_confidence": date_quality["date_confidence"],
@@ -566,17 +603,29 @@ def _entry_link(entry) -> str:
 
 
 def _source_lineage_metadata(source: Source, *, title: str, url: str) -> dict[str, str]:
-    original_source = _infer_original_source(source, title=title, url=url)
+    if source.trust_type == "official":
+        original_source = source.name
+        display_source = source.name
+        transfer_source = ""
+    elif source.source_type == SourceType.REDDIT_RSS:
+        original_source = _infer_original_source(source, title=title, url=url)
+        display_source = original_source or source.name
+        transfer_source = "Reddit 게시물"
+    else:
+        original_source = ""
+        display_source = source.name
+        transfer_source = ""
     return {
         "original_source": original_source or "",
-        "display_source": original_source or source.name,
+        "display_source": display_source,
+        "transfer_source": transfer_source,
         "collection_source": source.name,
     }
 
 
 def _infer_original_source(source: Source, *, title: str, url: str) -> str:
     if source.source_type != SourceType.REDDIT_RSS:
-        return source.name
+        return ""
     candidates = [
         "Bloomberg",
         "Reuters",
@@ -989,12 +1038,22 @@ def _link_issue(news_item: NewsItem) -> Issue:
         relation = IssueRelation.SAME_STORY
         relation_confidence = 1.0
         explanation = "새 이슈 생성"
+        decision_debug = {
+            "decision": "new_issue",
+            "decision_reason": "no_existing_issue_with_strong_signals",
+            "strong_signals": [],
+            "weak_signals": [],
+            "title_similarity": 0.0,
+            "shared_entities": [],
+            "shared_primary_franchises": [],
+        }
     else:
         issue = match.issue
         relation = match.relation
         relation_confidence = match.confidence
         explanation = match.explanation
-        if relation == IssueRelation.CONFIRMATION:
+        decision_debug = match.decision_debug
+        if relation in {IssueRelation.CONFIRMATION, IssueRelation.OFFICIAL_CONFIRMATION}:
             issue.status = IssueStatus.CONFIRMED
             issue.official_confirmed_at = news_item.published_at or now
         issue.confidence_score = max(issue.confidence_score, news_item.confidence_score)
@@ -1008,17 +1067,22 @@ def _link_issue(news_item: NewsItem) -> Issue:
             "relation": relation,
             "relation_confidence": relation_confidence,
             "explanation": explanation,
+            "decision_debug": decision_debug,
         },
     )
     if not created and (
         link.relation != relation
         or link.relation_confidence != relation_confidence
         or link.explanation != explanation
+        or link.decision_debug != decision_debug
     ):
         link.relation = relation
         link.relation_confidence = relation_confidence
         link.explanation = explanation
-        link.save(update_fields=["relation", "relation_confidence", "explanation"])
+        link.decision_debug = decision_debug
+        link.save(update_fields=["relation", "relation_confidence", "explanation", "decision_debug"])
+    rebuild_issue_title(issue)
+    refresh_issue_review_status(issue)
     return issue
 
 
@@ -1040,6 +1104,7 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
         overlap = len(tokens & issue_tokens)
         shared_tokens = sorted(tokens & issue_tokens)
         issue_items = [link.news_item for link in issue.news_links.all()]
+        issue_links = list(issue.news_links.all())
         issue_franchise_ids = {
             franchise_link.franchise_id
             for item in issue_items
@@ -1060,24 +1125,55 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
         weak_signals: list[str] = []
         if duplicate_url:
             strong_signals.append("canonical_url")
-        if similarity >= 0.72:
+        if similarity >= 0.82:
             strong_signals.append(f"title_similarity={similarity:.2f}")
-        elif similarity >= 0.55:
+        elif similarity >= 0.68:
             weak_signals.append(f"title_similarity={similarity:.2f}")
-        if overlap >= 3:
+        if overlap >= 2:
             strong_signals.append(f"shared_specific_tokens={shared_tokens[:6]}")
         elif overlap:
             weak_signals.append(f"shared_specific_tokens={shared_tokens[:6]}")
+            if confirmation_candidate:
+                strong_signals.append("shared_specific_token_confirmation")
         if shared_franchise:
-            strong_signals.append("shared_primary_franchise")
-        if confirmation_candidate and _has_confirmation_context(f"{news_item.title} {news_item.summary_original}"):
+            weak_signals.append("shared_primary_franchise")
+            if overlap >= 2:
+                strong_signals.append("shared_primary_franchise_with_entities")
+            if confirmation_candidate and overlap >= 1:
+                strong_signals.append("shared_primary_franchise_confirmation")
+        confirmation_context = confirmation_candidate and _has_confirmation_context(f"{news_item.title} {news_item.summary_original}")
+        if confirmation_context:
             strong_signals.append("official_confirmation_context")
 
-        same_story = duplicate_url or (len(strong_signals) >= 2 and (similarity >= 0.55 or overlap >= 2))
-        confirmation = confirmation_candidate and len(strong_signals) >= 2 and (
-            overlap >= 1 or similarity >= 0.55 or "official_confirmation_context" in strong_signals
+        low_relevance = getattr(news_item, "nintendo_relevance_score", 2) < 2
+        same_story = duplicate_url or (
+            not low_relevance
+            and len(strong_signals) >= 2
+            and (similarity >= 0.72 or overlap >= 2)
         )
+        confirmation = confirmation_candidate and (
+            (
+                len(strong_signals) >= 2
+                and (overlap >= 1 or similarity >= 0.68 or "official_confirmation_context" in strong_signals)
+            )
+            or (confirmation_context and (shared_franchise or overlap >= 1 or similarity >= 0.45))
+        )
+        decision_debug = {
+            "strong_signals": strong_signals,
+            "weak_signals": weak_signals,
+            "title_similarity": round(similarity, 3),
+            "shared_entities": shared_tokens[:8],
+            "shared_primary_franchises": sorted(news_franchise_ids & issue_franchise_ids),
+            "overlap": overlap,
+            "candidate_issue_id": issue.pk,
+        }
         if not same_story and not confirmation:
+            decision_debug.update(
+                {
+                    "decision": "new_issue",
+                    "decision_reason": "only_weak_or_generic_signals",
+                }
+            )
             logger.debug(
                 "Issue not linked item=%s issue=%s strong=%s weak=%s reason=%s",
                 news_item.pk,
@@ -1090,24 +1186,46 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
 
         score = overlap / max(min(len(tokens), len(issue_tokens)), 1)
         if shared_franchise:
-            score += 0.25
+            score += 0.1
         score += min(similarity * 0.2, 0.2)
         if confirmation_candidate:
             score += 0.15
         if "official_confirmation_context" in strong_signals:
             score += 0.25
+        if confirmation:
+            score = max(score, 0.65)
 
-        threshold = 0.5 if confirmation else 0.68
+        threshold = 0.5 if confirmation else 0.72
         if duplicate_url:
             score = max(score, 0.95)
         if score > best_score and score >= threshold:
-            relation = IssueRelation.CONFIRMATION if confirmation else IssueRelation.SAME_STORY
+            if duplicate_url:
+                relation = IssueRelation.SOURCE_DUPLICATE
+            elif confirmation:
+                relation = IssueRelation.OFFICIAL_CONFIRMATION
+            else:
+                relation = IssueRelation.SAME_STORY
+            decision_debug.update(
+                {
+                    "decision": "linked",
+                    "decision_reason": f"strong_signal_count={len(strong_signals)}",
+                    "relation": relation,
+                    "score": round(score, 3),
+                    "candidate_link_count": len(issue_links),
+                }
+            )
             explanation = (
                 f"decision=linked relation={relation}; strong_signals={strong_signals}; "
                 f"weak_signals={weak_signals}; shared_entities={shared_tokens[:8]}; "
                 f"overlap={overlap}; title_similarity={similarity:.2f}; score={score:.2f}"
             )
-            best_match = IssueMatch(issue=issue, relation=relation, confidence=round(min(score, 1.0), 3), explanation=explanation)
+            best_match = IssueMatch(
+                issue=issue,
+                relation=relation,
+                confidence=round(min(score, 1.0), 3),
+                explanation=explanation,
+                decision_debug=decision_debug,
+            )
             best_score = score
     return best_match
 

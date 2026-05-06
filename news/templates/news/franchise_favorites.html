@@ -1,10 +1,10 @@
 {% extends "news/base.html" %}
-{% block title %}관심 프랜차이즈 - Nintendo Watch{% endblock %}
+{% block title %}관심 게임종류 - Nintendo Watch{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>관심 프랜차이즈</h1>
-    <div class="muted">관심작만 보기 필터에 사용할 프랜차이즈를 선택합니다.</div>
+    <h1>관심 게임종류</h1>
+    <div class="muted">관심작만 보기 필터에 사용할 게임종류를 선택합니다.</div>
   </div>
 </div>
 
@@ -17,7 +17,7 @@
         {{ franchise.name }} · {{ franchise.item_count }}건
       </label>
     {% empty %}
-      <div class="muted">프랜차이즈가 없습니다.</div>
+      <div class="muted">게임종류가 없습니다.</div>
     {% endfor %}
   </div>
   <div class="button-row" style="margin-top: 14px;">

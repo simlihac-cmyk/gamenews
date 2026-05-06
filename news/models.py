@@ -69,7 +69,10 @@ class IssueRelation(models.TextChoices):
     SAME_STORY = "same_story", "Same story"
     FOLLOWUP = "followup", "Follow-up"
     CONFIRMATION = "confirmation", "Confirmation"
+    OFFICIAL_CONFIRMATION = "official_confirmation", "Official confirmation"
     DEBUNK = "debunk", "Debunk"
+    CONTRADICTS = "contradicts", "Contradicts"
+    SOURCE_DUPLICATE = "source_duplicate", "Source duplicate"
     RELATED = "related", "Related"
 
 
@@ -83,6 +86,18 @@ class DateConfidence(models.TextChoices):
     HIGH = "high", "High"
     MEDIUM = "medium", "Medium"
     LOW = "low", "Low"
+
+
+class NewsContentType(models.TextChoices):
+    NEWS_ARTICLE = "news_article", "News article"
+    OFFICIAL_NOTICE = "official_notice", "Official notice"
+    RUMOR = "rumor", "Rumor"
+    REVIEW = "review", "Review"
+    GUIDE = "guide", "Guide"
+    STATIC_PAGE = "static_page", "Static page"
+    LIST_PAGE = "list_page", "List page"
+    HUB_PAGE = "hub_page", "Hub page"
+    ROUNDUP = "roundup", "Roundup"
 
 
 class NotificationChannel(models.TextChoices):
@@ -204,7 +219,7 @@ class RawItem(models.Model):
     canonical_url_hash = models.CharField(max_length=64, blank=True, db_index=True)
     extraction_confidence = models.PositiveSmallIntegerField(default=100)
     rejection_reason = models.CharField(max_length=80, blank=True, db_index=True)
-    date_confidence = models.CharField(max_length=16, choices=DateConfidence.choices, default=DateConfidence.HIGH)
+    date_confidence = models.CharField(max_length=16, choices=DateConfidence.choices, default=DateConfidence.MEDIUM)
     is_date_suspect = models.BooleanField(default=False, db_index=True)
     date_suspect_reason = models.CharField(max_length=120, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
@@ -241,6 +256,15 @@ class NewsItem(models.Model):
     canonical_url = models.URLField(max_length=1000, null=True, blank=True)
     summary_ko = models.TextField(blank=True)
     summary_original = models.TextField(blank=True)
+    title_suspect = models.BooleanField(default=False, db_index=True)
+    title_suspect_reason = models.CharField(max_length=120, blank=True)
+    content_type = models.CharField(
+        max_length=32,
+        choices=NewsContentType.choices,
+        default=NewsContentType.NEWS_ARTICLE,
+        db_index=True,
+    )
+    nintendo_relevance_score = models.PositiveSmallIntegerField(default=2, db_index=True)
     trust_label = models.CharField(max_length=32, choices=TrustLabel.choices, default=TrustLabel.UNKNOWN)
     category = models.CharField(max_length=32, choices=NewsCategory.choices, default=NewsCategory.GENERAL)
     detected_tags = models.JSONField(default=list, blank=True)
@@ -262,7 +286,7 @@ class NewsItem(models.Model):
     trust_reasons = models.JSONField(default=list, blank=True)
     entity_mentions = models.JSONField(default=list, blank=True)
     thumbnail_url = models.URLField(max_length=1000, blank=True)
-    date_confidence = models.CharField(max_length=16, choices=DateConfidence.choices, default=DateConfidence.HIGH)
+    date_confidence = models.CharField(max_length=16, choices=DateConfidence.choices, default=DateConfidence.MEDIUM)
     is_date_suspect = models.BooleanField(default=False, db_index=True)
     date_suspect_reason = models.CharField(max_length=120, blank=True)
     is_read = models.BooleanField(default=False)
@@ -325,6 +349,8 @@ class Issue(models.Model):
     canonical_topic = models.CharField(max_length=500, db_index=True)
     status = models.CharField(max_length=32, choices=IssueStatus.choices, default=IssueStatus.DEVELOPING)
     confidence_score = models.IntegerField(default=50)
+    review_required = models.BooleanField(default=False, db_index=True)
+    review_reasons = models.JSONField(default=list, blank=True)
     first_seen_at = models.DateTimeField(default=timezone.now)
     last_updated_at = models.DateTimeField(default=timezone.now)
     official_confirmed_at = models.DateTimeField(null=True, blank=True)
@@ -358,6 +384,7 @@ class NewsItemIssue(models.Model):
     relation = models.CharField(max_length=32, choices=IssueRelation.choices, default=IssueRelation.RELATED)
     relation_confidence = models.FloatField(default=0.0)
     explanation = models.TextField(blank=True)
+    decision_debug = models.JSONField(default=dict, blank=True)
 
     class Meta:
         constraints = [
@@ -376,6 +403,8 @@ class Franchise(models.Model):
 
     class Meta:
         ordering = ["name"]
+        verbose_name = "게임종류"
+        verbose_name_plural = "게임종류"
 
     def __str__(self) -> str:
         return self.name
@@ -389,6 +418,8 @@ class NewsItemFranchise(models.Model):
     is_primary = models.BooleanField(default=True, db_index=True)
 
     class Meta:
+        verbose_name = "뉴스 게임종류 연결"
+        verbose_name_plural = "뉴스 게임종류 연결"
         constraints = [
             models.UniqueConstraint(fields=["news_item", "franchise"], name="unique_newsitem_franchise"),
         ]
@@ -403,6 +434,8 @@ class UserFranchiseFavorite(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        verbose_name = "관심 게임종류"
+        verbose_name_plural = "관심 게임종류"
         constraints = [
             models.UniqueConstraint(fields=["user", "franchise"], name="unique_user_franchise_favorite"),
         ]

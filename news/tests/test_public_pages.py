@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from news.models import Franchise, NewsItem, RawItem, Source, SourceType, TrustType, UserFranchiseFavorite
+from news.models import Franchise, NewsContentType, NewsItem, RawItem, Source, SourceType, TrustType, UserFranchiseFavorite
 from news.services.collectors import process_raw_item
 from news.services.text import create_content_hash
 
@@ -75,7 +77,7 @@ class PublicPageSecurityAndSeoTests(TestCase):
 
         self.client.force_login(self.user)
         no_favorites = self.client.get(reverse("news:item_list"), {"favorites_only": "on"})
-        self.assertContains(no_favorites, "관심 프랜차이즈를 설정하면 맞춤 타임라인을 볼 수 있습니다.")
+        self.assertContains(no_favorites, "관심 게임종류를 설정하면 맞춤 타임라인을 볼 수 있습니다.")
 
         UserFranchiseFavorite.objects.create(user=self.user, franchise=self.zelda)
         with_favorite = self.client.get(reverse("news:item_list"), {"favorites_only": "on"})
@@ -218,6 +220,115 @@ class PublicPageSecurityAndSeoTests(TestCase):
         detail = self.client.get(reverse("news:item_detail", args=[item.pk]))
         self.assertContains(detail, item.title)
 
+    def test_franchise_pages_render_each_item_once_and_use_common_badges(self):
+        mario = Franchise.objects.create(name="Mario", slug="mario", aliases=["Mario", "Super Mario", "Mario Kart"], priority=90)
+        pokemon = Franchise.objects.create(name="Pokémon", slug="pokemon", aliases=["Pokémon", "Pokemon"], priority=90)
+        source = Source.objects.create(
+            name="Reddit Rumor",
+            slug="reddit-rumor-franchise",
+            url="https://reddit.example/feed",
+            source_type=SourceType.RSS,
+            trust_type=TrustType.RUMOR,
+        )
+        raw = RawItem.objects.create(
+            source=source,
+            title="Mario Kart and Pokemon Switch 2 rumor",
+            url="https://reddit.example/r/GamingLeaksAndRumours/comments/franchise/mario-pokemon",
+            canonical_url="https://reddit.example/r/GamingLeaksAndRumours/comments/franchise/mario-pokemon",
+            published_at=timezone.now(),
+            raw_text="Mario Kart and Pokemon are both mentioned as part of a Switch 2 rumor.",
+            content_hash=create_content_hash("Mario Kart and Pokemon Switch 2 rumor", "https://reddit.example/r/GamingLeaksAndRumours/comments/franchise/mario-pokemon"),
+        )
+        item, _created = process_raw_item(raw)
+        item.entity_mentions = [
+            {"slug": "mario", "name": "Mario", "matched_alias": "Mario", "is_primary": True},
+            {"slug": "mario", "name": "Mario", "matched_alias": "Super Mario", "is_primary": True},
+            {"slug": "pokemon", "name": "Pokémon", "matched_alias": "Pokemon", "is_primary": True},
+        ]
+        item.save(update_fields=["entity_mentions"])
+
+        mario_response = self.client.get(reverse("news:franchise_detail", args=[mario.slug]))
+        pokemon_response = self.client.get(reverse("news:franchise_detail", args=[pokemon.slug]))
+
+        self.assertEqual([obj.pk for obj in mario_response.context["page"].object_list].count(item.pk), 1)
+        self.assertEqual([obj.pk for obj in pokemon_response.context["page"].object_list].count(item.pk), 1)
+        self.assertNotIn("루머 루머", mario_response.content.decode())
+
+    def test_home_headlines_exclude_unknown_static_and_review_required_items(self):
+        official = self.make_item("Switch 2 release date official reveal", published_at=timezone.now())
+        unknown = self.make_item("Nintendo Switch 2 software list updated", published_at=timezone.now())
+        NewsItem.objects.filter(pk=unknown.pk).update(
+            published_at=None,
+            importance_score=100,
+            importance_reasons=["테스트"],
+            nintendo_relevance_score=4,
+        )
+        static = self.make_item("Nintendo Switch 2 software list", published_at=timezone.now())
+        NewsItem.objects.filter(pk=static.pk).update(
+            content_type=NewsContentType.LIST_PAGE,
+            importance_score=100,
+            importance_reasons=["테스트"],
+            nintendo_relevance_score=4,
+        )
+        review_item = self.make_item("Nintendo official review required item", published_at=timezone.now())
+        issue = review_item.issue_links.get().issue
+        issue.review_required = True
+        issue.review_reasons = ["테스트"]
+        issue.save(update_fields=["review_required", "review_reasons"])
+
+        response = self.client.get(reverse("news:item_list"))
+        headline_titles = [item.title for section in response.context["headline_sections"] for item in section["items"]]
+
+        self.assertIn(official.title, headline_titles)
+        self.assertNotIn(unknown.title, headline_titles)
+        self.assertNotIn(static.title, headline_titles)
+        self.assertNotIn(review_item.title, headline_titles)
+
+    def test_source_attribution_rules_hide_unhelpful_original_source_placeholder(self):
+        official = self.make_item("Switch 2 source attribution announced", published_at=timezone.now())
+        press_source = Source.objects.create(
+            name="Nintendo Life",
+            slug="nintendo-life-attribution",
+            url="https://example.com/feed",
+            source_type=SourceType.RSS,
+            trust_type=TrustType.PRESS,
+        )
+        press_raw = RawItem.objects.create(
+            source=press_source,
+            title="Nintendo Switch 2 report from media",
+            url="https://example.com/news/media-report",
+            canonical_url="https://example.com/news/media-report",
+            published_at=timezone.now(),
+            raw_text="Nintendo Switch 2 media report.",
+            content_hash=create_content_hash("Nintendo Switch 2 report from media", "https://example.com/news/media-report"),
+        )
+        press_item, _created = process_raw_item(press_raw)
+        rumor_source = Source.objects.create(
+            name="GamingLeaksAndRumours Reddit RSS",
+            slug="reddit-attribution",
+            url="https://reddit.example/feed",
+            source_type=SourceType.REDDIT_RSS,
+            trust_type=TrustType.RUMOR,
+        )
+        rumor_raw = RawItem.objects.create(
+            source=rumor_source,
+            title="Switch 2 rumor without visible source",
+            url="https://reddit.example/r/GamingLeaksAndRumours/comments/source/missing",
+            canonical_url="https://reddit.example/r/GamingLeaksAndRumours/comments/source/missing",
+            published_at=timezone.now(),
+            raw_text="A Switch 2 rumor.",
+            content_hash=create_content_hash("Switch 2 rumor without visible source", "https://reddit.example/r/GamingLeaksAndRumours/comments/source/missing"),
+        )
+        rumor_item, _created = process_raw_item(rumor_raw)
+
+        official_html = self.client.get(reverse("news:item_detail", args=[official.pk])).content.decode()
+        press_html = self.client.get(reverse("news:item_detail", args=[press_item.pk])).content.decode()
+        rumor_html = self.client.get(reverse("news:item_detail", args=[rumor_item.pk])).content.decode()
+
+        self.assertNotIn("원출처 확인 필요", official_html)
+        self.assertNotIn("원출처 확인 필요", press_html)
+        self.assertIn("원출처 확인 필요", rumor_html)
+
     def test_login_page_has_noindex_csrf_autocomplete_and_policy_links(self):
         response = self.client.get(reverse("login"))
 
@@ -256,6 +367,21 @@ class PublicPageSecurityAndSeoTests(TestCase):
         self.assertContains(item_page, '<optgroup label="전문 매체">', html=False)
         self.assertContains(item_page, '<optgroup label="루머 소스">', html=False)
 
+    def test_game_type_label_and_seeded_names_are_korean(self):
+        call_command("seed_sources", stdout=StringIO())
+
+        response = self.client.get(reverse("news:item_list"))
+        html = response.content.decode()
+
+        self.assertContains(response, "게임종류")
+        self.assertContains(response, "게임종류 전체")
+        self.assertContains(response, "마리오")
+        self.assertContains(response, "젤다의 전설")
+        self.assertContains(response, "포켓몬")
+        self.assertNotIn(">Mario<", html)
+        self.assertNotIn(">Zelda<", html)
+        self.assertNotIn(">Pokémon<", html)
+
     def test_active_filter_chips_and_filter_accessibility(self):
         self.make_item("Zelda release date announced")
 
@@ -266,4 +392,4 @@ class PublicPageSecurityAndSeoTests(TestCase):
         self.assertContains(response, "활성 필터")
         self.assertContains(response, "검색: Zelda")
         self.assertContains(response, "중요도 80+")
-        self.assertContains(response, "로그인하면 읽음, 북마크, 관심 프랜차이즈를 저장할 수 있습니다.")
+        self.assertContains(response, "로그인하면 읽음, 북마크, 관심 게임종류를 저장할 수 있습니다.")

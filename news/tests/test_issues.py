@@ -98,7 +98,7 @@ class IssueGroupingTests(TestCase):
         self.assertEqual(issue.status, IssueStatus.CONFIRMED)
         self.assertEqual(issue.status_ko, "공식 확정")
         self.assertIsNotNone(issue.official_confirmed_at)
-        self.assertEqual(official_link.relation, IssueRelation.CONFIRMATION)
+        self.assertEqual(official_link.relation, IssueRelation.OFFICIAL_CONFIRMATION)
 
     def test_shared_franchise_can_group_low_token_overlap_confirmation(self):
         rumor_raw = self.make_raw_item(
@@ -224,6 +224,93 @@ class IssueGroupingTests(TestCase):
             pikmin_item.issue_links.get().issue_id,
             youtube_item.issue_links.get().issue_id,
         )
+
+    def test_unrelated_official_items_do_not_merge_on_source_or_switch_only(self):
+        Franchise.objects.create(name="Pikmin", slug="pikmin", aliases=["Pikmin", "Pikmin Bloom"], priority=80)
+        Franchise.objects.create(name="Pokémon", slug="pokemon", aliases=["Pokémon", "Pokemon", "Pokopia"], priority=90)
+        cases = [
+            ("Game Pak Decor Pikmin arrive in Pikmin Bloom", "Pikmin Bloom receives a new decor event.", "pikmin"),
+            ("Get ready for Pokémon Pokopia on Nintendo Switch 2", "A separate Pokemon title has a Switch 2 update.", "pokopia"),
+            ("PRAGMATA launches on Nintendo Switch 2", "A Capcom game has Switch 2 platform notes.", "pragmata"),
+        ]
+
+        items = []
+        for title, text, slug in cases:
+            raw = self.make_raw_item(
+                self.official_source,
+                title,
+                f"https://official.example/{slug}",
+                raw_text=text,
+            )
+            item, _created = process_raw_item(raw)
+            items.append(item)
+
+        self.assertEqual(Issue.objects.count(), 3)
+        self.assertEqual(len({item.issue_links.get().issue_id for item in items}), 3)
+
+    def test_clustering_debug_is_saved_for_linked_same_story(self):
+        first = self.make_raw_item(
+            self.official_source,
+            "The making of the music of Zelda Echoes - Chapter 1",
+            "https://official.example/zelda-music-1",
+        )
+        second = self.make_raw_item(
+            self.official_source,
+            "The making of the music of Zelda Echoes - Chapter 2",
+            "https://official.example/zelda-music-2",
+        )
+
+        process_raw_item(first)
+        second_item, _created = process_raw_item(second)
+
+        link = second_item.issue_links.get()
+        self.assertEqual(link.relation, IssueRelation.SAME_STORY)
+        self.assertTrue(link.decision_debug)
+        self.assertIn("strong_signals", link.decision_debug)
+        self.assertEqual(link.decision_debug["decision"], "linked")
+
+    def test_mark_suspect_issues_dry_run_and_apply(self):
+        franchises = [
+            Franchise.objects.create(name=f"Series {index}", slug=f"series-{index}", aliases=[f"Series {index}"], priority=50)
+            for index in range(5)
+        ]
+        issue = Issue.objects.create(
+            title="Mixed issue Read more",
+            canonical_topic="mixed issue",
+            status=IssueStatus.CONFIRMED,
+            confidence_score=93,
+        )
+        for index in range(12):
+            franchise = franchises[index % len(franchises)]
+            title = f"{franchise.name} separate topic {index}"
+            raw = self.make_raw_item(
+                self.official_source,
+                title,
+                f"https://official.example/mixed-{index}",
+                raw_text=f"{franchise.name} has a separate announcement.",
+            )
+            item, _created = process_raw_item(raw)
+            item.issue_links.all().delete()
+            NewsItemIssue.objects.create(
+                news_item=item,
+                issue=issue,
+                relation=IssueRelation.SAME_STORY,
+                relation_confidence=0.9,
+                explanation="test mixed issue",
+                decision_debug={"strong_signals": ["test"], "weak_signals": [], "decision": "linked"},
+            )
+
+        dry_out = StringIO()
+        call_command("mark_suspect_issues", "--dry-run", "--issue-id", str(issue.pk), stdout=dry_out)
+        issue.refresh_from_db()
+        self.assertFalse(issue.review_required)
+        self.assertIn("DRY-RUN", dry_out.getvalue())
+
+        apply_out = StringIO()
+        call_command("mark_suspect_issues", "--apply", "--issue-id", str(issue.pk), stdout=apply_out)
+        issue.refresh_from_db()
+        self.assertTrue(issue.review_required)
+        self.assertTrue(any(reason.startswith("same_story_items=") for reason in issue.review_reasons))
 
     def test_issue_detail_separates_related_items_from_core_timeline(self):
         rumor_raw = self.make_raw_item(

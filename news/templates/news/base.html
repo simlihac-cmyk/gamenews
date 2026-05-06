@@ -615,7 +615,7 @@
         <a href="{% url 'news:issue_list' %}">이슈</a>
         <a href="{% url 'news:source_list' %}">출처</a>
         <a href="{% url 'news:source_health' %}">상태</a>
-        <a href="{% url 'news:franchise_list' %}">프랜차이즈</a>
+        <a href="{% url 'news:franchise_list' %}">게임종류</a>
         {% if request.user.is_staff or request.user.is_superuser %}
           <a href="/admin/">관리자</a>
         {% endif %}

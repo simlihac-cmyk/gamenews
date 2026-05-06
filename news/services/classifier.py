@@ -155,6 +155,16 @@ def detect_franchise_matches(title: str, raw_text: str = "") -> list[FranchiseMa
                     )
                 )
                 break
+    if _is_broad_collection(raw_haystack) and sum(1 for match in matches if match.is_primary) > 2:
+        return [
+            FranchiseMatch(
+                franchise=match.franchise,
+                matched_alias=match.matched_alias,
+                confidence_score=min(match.confidence_score, 45),
+                is_primary=False,
+            )
+            for match in matches
+        ]
     return matches
 
 
@@ -217,5 +227,22 @@ def _has_primary_context(value: str) -> bool:
             "발매",
             "출시",
             "업데이트",
+        ]
+    )
+
+
+def _is_broad_collection(value: str) -> bool:
+    normalized = normalize_title(value)
+    return any(
+        marker in normalized
+        for marker in [
+            "roundup",
+            "round up",
+            "breakdown",
+            "rumor roundup",
+            "rumour roundup",
+            "everything announced",
+            "weekly recap",
+            "nintendo breakdown",
         ]
     )

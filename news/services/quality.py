@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from django.utils import timezone
 
-from news.models import DateConfidence, NewsItem, PublishedAtPrecision, Source, TrustLabel
+from news.models import DateConfidence, NewsContentType, NewsItem, PublishedAtPrecision, Source, TrustLabel, TrustType
 
 from .source_adapters import adapter_config
 from .text import normalize_title, normalize_whitespace
@@ -95,6 +95,27 @@ HUB_PATH_EXACT_SUFFIXES = {
 }
 
 PUBLIC_EXCERPT_CHAR_LIMIT = 500
+TITLE_SUSPECT_LENGTH = 120
+STATIC_CONTENT_TYPES = {
+    NewsContentType.STATIC_PAGE,
+    NewsContentType.LIST_PAGE,
+    NewsContentType.HUB_PAGE,
+}
+
+BODY_START_PATTERNS = [
+    r"This month,",
+    r"Whether you(?:'|’)re",
+    r"Check out",
+    r"The .{1,80}? game",
+    r"Get ready",
+    r"Available now",
+    r"Starting today",
+    r"In this article",
+    r"Learn more",
+    r"Read more",
+]
+BODY_START_RE = re.compile(r"\s+(?:" + "|".join(BODY_START_PATTERNS) + r").*$", flags=re.IGNORECASE)
+BODY_START_ANYWHERE_RE = re.compile(r"(?:" + "|".join(BODY_START_PATTERNS) + r")", flags=re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -108,6 +129,13 @@ class FranchiseMatch:
 @dataclass(frozen=True)
 class DateQuality:
     confidence: str
+    is_suspect: bool
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class TitleQuality:
+    cleaned: str
     is_suspect: bool
     reason: str = ""
 
@@ -134,19 +162,42 @@ def clean_title(title: str, source_slug: str | None = None) -> str:
         value,
         flags=re.IGNORECASE,
     )
-    if len(value) > 120:
-        value = re.sub(
-            r"\s+(?:This month|This week|Check out|Learn more|Find out|Plus,|Now available|Here's what|Here are)\b.*$",
-            "",
-            value,
-            flags=re.IGNORECASE,
-        )
+    value = _strip_body_start_tail(value)
     if len(value) > 140:
         sentence_match = re.match(r"^(.{45,140}?[.!?])\s+[A-Z0-9가-힣]", value)
         if sentence_match:
             value = sentence_match.group(1)
     value = normalize_whitespace(value)
     return value
+
+
+def title_quality(title: str, source_slug: str | None = None) -> TitleQuality:
+    raw = normalize_whitespace(title)
+    cleaned = clean_title(raw, source_slug)
+    reasons: list[str] = []
+    if len(cleaned) > TITLE_SUSPECT_LENGTH:
+        reasons.append("long_title")
+    if "read more" in raw.casefold() and "read more" in cleaned.casefold():
+        reasons.append("read_more_in_title")
+    if has_body_start_pattern(cleaned):
+        reasons.append("body_start_pattern")
+    if not cleaned:
+        reasons.append("empty_title")
+    return TitleQuality(cleaned=cleaned, is_suspect=bool(reasons), reason=",".join(_dedupe_strings(reasons)))
+
+
+def has_body_start_pattern(title: str) -> bool:
+    return bool(BODY_START_ANYWHERE_RE.search(normalize_whitespace(title)))
+
+
+def _strip_body_start_tail(value: str) -> str:
+    clean = normalize_whitespace(value)
+    if len(clean) < 24:
+        return clean
+    match = BODY_START_RE.search(clean)
+    if not match or match.start() < 18:
+        return clean
+    return normalize_whitespace(clean[: match.start()])
 
 
 def is_boilerplate_title(title: str, source: Source | None = None) -> bool:
@@ -274,6 +325,13 @@ def is_generic_summary(summary: str) -> bool:
 
 
 def fallback_summary_for(item: NewsItem) -> str:
+    quality_fallback = summary_quality_fallback(
+        trust_label=item.trust_label,
+        content_type=getattr(item, "content_type", ""),
+        title_suspect=getattr(item, "title_suspect", False),
+    )
+    if quality_fallback:
+        return quality_fallback
     source_kind = "공식 출처" if item.trust_label == TrustLabel.OFFICIAL else "루머/유출성 출처" if item.trust_label == TrustLabel.RUMOR else "보도 출처"
     confirmation = {
         TrustLabel.OFFICIAL: "공식 출처에서 확인된 항목입니다.",
@@ -285,6 +343,20 @@ def fallback_summary_for(item: NewsItem) -> str:
         f"아직 상세 요약은 없지만, 제목과 {source_kind} 정보를 기준으로 분류된 소식입니다. "
         f"{confirmation} 원문에서 확인 후 요약이 보강될 예정입니다."
     )
+
+
+def summary_quality_fallback(*, trust_label: str, content_type: str = "", title_suspect: bool = False) -> str:
+    if title_suspect:
+        if trust_label == TrustLabel.OFFICIAL:
+            return "이 항목은 Nintendo 공식 페이지에서 수집된 소식이지만, 제목/본문 추출 품질 확인이 필요합니다. 원문 링크에서 세부 내용을 확인하세요."
+        if trust_label == TrustLabel.RUMOR:
+            return "이 항목은 루머/유출성 정보로, 공식 확인 전입니다. 현재 제목/본문 추출 품질 확인이 필요하므로 원문 링크에서 세부 내용을 확인하세요."
+        return "이 항목은 해외 매체에서 수집된 기사입니다. 현재 상세 요약은 제한적이며, 원문 확인이 필요합니다."
+    if content_type in STATIC_CONTENT_TYPES:
+        return "이 항목은 뉴스 기사보다 목록/허브 성격이 강한 페이지입니다. 최신 핵심 뉴스로 보기 전에 원문 링크에서 맥락을 확인하세요."
+    if trust_label == TrustLabel.RUMOR:
+        return ""
+    return ""
 
 
 def public_excerpt(raw_text: str, *, char_limit: int = PUBLIC_EXCERPT_CHAR_LIMIT, sentence_limit: int = 2) -> str:
@@ -304,6 +376,44 @@ def is_backfill_item(published_at, first_seen_at, *, days: int = 14) -> bool:
     if not published_at or not first_seen_at:
         return False
     return first_seen_at - published_at >= timedelta(days=days)
+
+
+def classify_content_type(*, title: str, url: str, raw_text: str = "", source: Source | None = None) -> str:
+    normalized = normalize_title(f"{title} {raw_text[:300]}")
+    lowered_title = normalize_whitespace(title).casefold()
+    path = (urlparse(url).path or "").casefold()
+    if is_hub_url(url, source):
+        return NewsContentType.HUB_PAGE
+    if any(marker in path for marker in ["/all-games", "/games/", "/software/", "/platforms/"]):
+        return NewsContentType.LIST_PAGE
+    if any(marker in normalized for marker in ["all games", "software list", "switch games list", "games coming soon"]):
+        return NewsContentType.LIST_PAGE
+    if any(marker in normalized for marker in ["which nintendo switch is right for you", "support", "privacy", "terms"]):
+        return NewsContentType.STATIC_PAGE
+    if any(marker in lowered_title for marker in ["roundup", "breakdown", "rumour round-up", "rumor roundup", "summary", "everything announced"]):
+        return NewsContentType.ROUNDUP
+    if any(marker in path for marker in ["/guides/", "/guide/"]) or "guide" in normalized:
+        return NewsContentType.GUIDE
+    if any(marker in path for marker in ["/reviews/", "/review/"]) or normalized.startswith("review "):
+        return NewsContentType.REVIEW
+    if any(marker in normalized for marker in ["rumor", "rumour", "leak", "reportedly"]):
+        return NewsContentType.RUMOR
+    if source and source.trust_type == TrustType.OFFICIAL:
+        return NewsContentType.OFFICIAL_NOTICE
+    return NewsContentType.NEWS_ARTICLE
+
+
+def is_low_quality_for_headline(item: NewsItem) -> bool:
+    return bool(
+        getattr(item, "title_suspect", False)
+        or getattr(item, "is_date_suspect", False)
+        or not getattr(item, "published_at", None)
+        or getattr(item, "date_confidence", "") == DateConfidence.LOW
+        or getattr(item, "content_type", "") in STATIC_CONTENT_TYPES
+        or getattr(item, "is_backfill", False)
+        or not getattr(item, "importance_reasons", None)
+        or getattr(item, "nintendo_relevance_score", 0) < 3
+    )
 
 
 def precision_for_datetime(value, raw_text: str = "") -> str:
@@ -376,3 +486,14 @@ def _looks_like_article_url(url: str, source: Source | None = None) -> bool:
         return True
     title_path = normalize_title(path.replace("/", " "))
     return len(title_path.split()) >= 3
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result

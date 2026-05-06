@@ -39,6 +39,7 @@
     <article class="card">
       <div class="badge-row">
         <span class="badge {{ issue.status }}">{{ issue.status_ko }}</span>
+        {% if issue.review_required %}<span class="badge state">검토 필요</span>{% endif %}
         <span class="badge">신뢰도 {{ issue.confidence_score }}</span>
         <span class="badge">항목 {{ issue.item_count }}</span>
       </div>

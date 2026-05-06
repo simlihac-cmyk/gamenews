@@ -303,7 +303,7 @@ def _issue_context(news_item: NewsItem):
 
 
 def _confirms_issue(news_item: NewsItem) -> bool:
-    return news_item.issue_links.filter(relation="confirmation").exists()
+    return news_item.issue_links.filter(relation__in=["confirmation", "official_confirmation"]).exists()
 
 
 def _issue_context_text(news_item: NewsItem) -> str:

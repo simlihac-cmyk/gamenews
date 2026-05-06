@@ -19,12 +19,17 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .forms import NewsItemFilterForm
-from .models import Franchise, Issue, IssueRelation, IssueStatus, NewsItem, NewsItemIssue, RawItem, Source, UserFranchiseFavorite
+from .models import Franchise, Issue, IssueRelation, IssueStatus, NewsContentType, NewsItem, NewsItemIssue, RawItem, Source, UserFranchiseFavorite
 from .services.collectors import collect_source, process_raw_item, recalculate_news_item
 from .services.quality import LOW_CONFIDENCE_THRESHOLD, fallback_summary_for, is_generic_summary, public_excerpt
 
 
 PAGE_SIZE = 25
+STATIC_CONTENT_TYPES = {
+    NewsContentType.STATIC_PAGE,
+    NewsContentType.LIST_PAGE,
+    NewsContentType.HUB_PAGE,
+}
 
 PUBLIC_TIMELINE_DESCRIPTION = (
     "닌텐도 공식 뉴스, 보도, 루머, 발매일, Direct 소식을 출처와 이슈 흐름별로 모아보는 비공식 뉴스 모니터링 사이트입니다."
@@ -99,7 +104,22 @@ def _apply_datetime_range(queryset, field: str, *, date_from=None, date_to=None)
 
 
 def _home_headline_sections() -> list[dict[str, object]]:
-    base = _public_items_queryset().select_related("source").prefetch_related("franchise_links__franchise")
+    base = (
+        _public_items_queryset()
+        .select_related("source")
+        .prefetch_related("franchise_links__franchise", "issue_links__issue")
+        .filter(
+            published_at__isnull=False,
+            title_suspect=False,
+            nintendo_relevance_score__gte=3,
+        )
+        .exclude(date_confidence="low")
+        .exclude(content_type__in=STATIC_CONTENT_TYPES)
+        .exclude(is_backfill=True)
+        .exclude(importance_reasons=[])
+        .exclude(issue_links__issue__review_required=True)
+        .distinct()
+    )
     return [
         {
             "title": "오늘의 핵심 5개",
@@ -184,7 +204,7 @@ def _active_filter_chips(request, form: NewsItemFilterForm) -> list[dict[str, st
     if data.get("source"):
         chips.append({"label": f"출처: {data['source'].name}", "url": remove_query("source")})
     if data.get("franchise"):
-        chips.append({"label": f"프랜차이즈: {data['franchise'].name}", "url": remove_query("franchise")})
+        chips.append({"label": f"게임종류: {data['franchise'].name}", "url": remove_query("franchise")})
     if data.get("min_importance") is not None:
         chips.append({"label": f"중요도 {data['min_importance']}+", "url": remove_query("min_importance")})
     if data.get("date_from") or data.get("date_to"):
@@ -276,7 +296,7 @@ def item_list(request):
                     items = items.filter(franchise_links__franchise_id__in=favorite_ids, franchise_links__is_primary=True)
                 else:
                     items = items.none()
-                    empty_state = "no_favorites"
+                empty_state = "no_favorites"
         if data.get("min_importance") is not None:
             items = items.filter(importance_score__gte=data["min_importance"])
         date_field = "first_seen_at" if sort == "detected" else "published_at"
@@ -382,7 +402,12 @@ def item_detail(request, pk: int):
         article_json_ld["about"] = about
     if item.published_at:
         article_json_ld["datePublished"] = item.published_at.isoformat()
-    show_summary = bool(item.summary_ko and not is_generic_summary(item.summary_ko))
+    show_summary = bool(
+        item.summary_ko
+        and not is_generic_summary(item.summary_ko)
+        and not item.title_suspect
+        and item.content_type not in STATIC_CONTENT_TYPES
+    )
     return render(
         request,
         "news/item_detail.html",
@@ -478,7 +503,15 @@ def issue_detail(request, pk: int):
     )
     official_count = sum(1 for link in links if link.news_item.trust_label == "official")
     rumor_count = sum(1 for link in links if link.news_item.trust_label == "rumor")
-    core_relations = {IssueRelation.SAME_STORY, IssueRelation.FOLLOWUP, IssueRelation.CONFIRMATION, IssueRelation.DEBUNK}
+    core_relations = {
+        IssueRelation.SAME_STORY,
+        IssueRelation.SOURCE_DUPLICATE,
+        IssueRelation.FOLLOWUP,
+        IssueRelation.CONFIRMATION,
+        IssueRelation.OFFICIAL_CONFIRMATION,
+        IssueRelation.DEBUNK,
+        IssueRelation.CONTRADICTS,
+    }
     core_links = [link for link in links if link.relation in core_relations]
     related_links = [link for link in links if link.relation == IssueRelation.RELATED]
     return render(
@@ -620,7 +653,7 @@ def franchise_list(request):
             **_seo_context(
                 request,
                 canonical_url=_absolute_url(request, "news:franchise_list"),
-                description="Nintendo Watch에서 별칭으로 추적하는 닌텐도 프랜차이즈 목록입니다.",
+                description="Nintendo Watch에서 별칭으로 추적하는 닌텐도 게임종류 목록입니다.",
             ),
         },
     )
@@ -642,7 +675,7 @@ def franchise_favorites(request):
             ],
             ignore_conflicts=True,
         )
-        messages.success(request, "관심 프랜차이즈를 저장했습니다.")
+        messages.success(request, "관심 게임종류를 저장했습니다.")
         return redirect("news:franchise_favorites")
 
     favorite_ids = set(UserFranchiseFavorite.objects.filter(user=request.user).values_list("franchise_id", flat=True))
@@ -668,7 +701,8 @@ def franchise_detail(request, slug: str):
         .filter(franchise_links__franchise=franchise)
         .filter(franchise_links__is_primary=True)
         .select_related("source")
-        .prefetch_related("franchise_links__franchise")
+        .prefetch_related("franchise_links__franchise", "issue_links__issue")
+        .distinct()
     )
     items = _order_items(items)
     paginator = Paginator(items, PAGE_SIZE)
@@ -817,7 +851,7 @@ STATIC_PAGE_CONTENT = {
         "title": "개인정보처리방침",
         "description": "로그인, 쿠키, 개인화 기능에서 저장될 수 있는 정보를 설명합니다.",
         "sections": [
-            ("저장 정보", "로그인 사용 시 계정 정보와 세션 정보가 저장될 수 있습니다. 읽음, 북마크, 관심 프랜차이즈 기능을 사용하면 해당 선택이 저장됩니다."),
+            ("저장 정보", "로그인 사용 시 계정 정보와 세션 정보가 저장될 수 있습니다. 읽음, 북마크, 관심 게임종류 기능을 사용하면 해당 선택이 저장됩니다."),
             ("쿠키와 세션", "로그인 유지와 CSRF 보호를 위해 쿠키와 세션을 사용합니다."),
             ("문의", "개인정보 문의처는 준비 중입니다."),
         ],

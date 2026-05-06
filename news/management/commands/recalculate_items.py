@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Recalculate classification, summaries, importance, franchises, and issue links for existing items."
+    help = "Recalculate classification, summaries, importance, game type links, and issue links for existing items."
 
     def add_arguments(self, parser):
         parser.add_argument("--limit", type=int, default=None, help="Maximum number of items to recalculate.")

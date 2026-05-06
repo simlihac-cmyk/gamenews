@@ -259,7 +259,7 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
 - 제목 정규화 토큰 겹침
 - 같은/연관 카테고리
-- 같은 프랜차이즈 감지 결과
+- 같은 게임종류 감지 결과
 - 공식 출처가 기존 루머/전개 중 이슈를 확인하는지 여부
 
 이슈 상태는 `루머 관찰 중`, `전개 중`, `공식 확정`, `반박됨`, `오래됨`으로 표시됩니다. 공식 뉴스가 기존 루머/전개 중 이슈와 연결되면 `공식 확정`으로 바뀌고 공식 확인 시각이 기록됩니다.
@@ -356,7 +356,7 @@ BACKUP_DIR=/Users/sg_mac/gamenews/backups/postgres
 
 ## 수동 명령
 
-기본 소스와 프랜차이즈 생성:
+기본 소스와 게임종류 생성:
 
 ```bash
 docker compose exec web python manage.py seed_sources
@@ -583,6 +583,6 @@ YouTube RSS:
 
 - HTML 소스는 selector 품질에 따라 수집 정확도가 달라집니다.
 - 한국어 요약은 기본값이 rule-based입니다. `SUMMARY_PROVIDER=auto` 또는 `openai`를 설정하면 선택적으로 LLM 요약을 사용할 수 있습니다.
-- 이슈 그룹핑은 최근 14일 제목 토큰, 카테고리, 프랜차이즈 기반의 단순 규칙입니다.
+- 이슈 그룹핑은 최근 14일 제목 토큰, 카테고리, 게임종류 기반의 단순 규칙입니다.
 - YouTube Korea 소스는 공식 channel ID를 기록해 두었지만, 현재 YouTube RSS endpoint가 404를 반환하므로 기본 비활성입니다.
 - 검색은 아직 PostgreSQL full-text search가 아니라 단순 DB 검색입니다.

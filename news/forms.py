@@ -46,7 +46,7 @@ class NewsItemFilterForm(forms.Form):
     trust_label = forms.ChoiceField(required=False, choices=TRUST_LABEL_CHOICES_KO, label="신뢰도")
     category = forms.ChoiceField(required=False, choices=CATEGORY_CHOICES_KO, label="카테고리")
     source = forms.ModelChoiceField(required=False, queryset=Source.objects.none(), label="출처")
-    franchise = forms.ModelChoiceField(required=False, queryset=Franchise.objects.none(), label="프랜차이즈")
+    franchise = forms.ModelChoiceField(required=False, queryset=Franchise.objects.none(), label="게임종류")
     is_read = forms.ChoiceField(required=False, choices=READ_CHOICES, label="읽음")
     is_bookmarked = forms.ChoiceField(required=False, choices=BOOKMARK_CHOICES, label="북마크")
     favorites_only = forms.BooleanField(required=False, label="관심작만 보기")
@@ -61,7 +61,7 @@ class NewsItemFilterForm(forms.Form):
         self.fields["source"].empty_label = "출처 전체"
         self.fields["source"].choices = _grouped_source_choices(self.fields["source"].queryset)
         self.fields["franchise"].queryset = Franchise.objects.order_by("name")
-        self.fields["franchise"].empty_label = "프랜차이즈 전체"
+        self.fields["franchise"].empty_label = "게임종류 전체"
 
 
 def _grouped_source_choices(queryset):

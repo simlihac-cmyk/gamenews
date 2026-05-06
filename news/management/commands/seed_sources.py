@@ -73,7 +73,7 @@ SOURCES = [
         "config": {
             "embedded_json_selector": "script#__NEXT_DATA__",
             "embedded_json_item_type": "NewsArticle",
-            "embedded_json_title_fields": ["title"],
+            "embedded_json_title_fields": ["headline", "name", "title"],
             "embedded_json_url_fields": ['url({"relative":true})'],
             "embedded_json_summary_fields": ['body.text({"characterLimit":250})'],
             "embedded_json_date_fields": ["publishDate"],
@@ -92,7 +92,7 @@ SOURCES = [
         "language": Language.EN,
         "config": {
             "item_selector": ".overview-news-element, li.page-list-group-item",
-            "title_selector": ".news-list-title, .page-title",
+            "title_selector": "h2 a, h3 a, .news-list-title a, .page-title a, .news-list-title, .page-title",
             "link_selector": "a[href]",
             "date_selector": ".date, .page-data",
             "summary_selector": ".news-list-info p:not(.date):not(.news-list-title), .strapline",
@@ -191,22 +191,22 @@ SOURCES = [
 ]
 
 FRANCHISES = [
-    ("Mario", "mario", ["Mario", "Super Mario", "마리오", "슈퍼 마리오", "Mario Kart", "마리오 카트", "マリオ"], 90),
-    ("Zelda", "zelda", ["The Legend of Zelda", "Zelda", "젤다의 전설", "젤다", "야숨", "왕눈", "ゼルダ"], 90),
-    ("Pokémon", "pokemon", ["Pokémon", "Pokemon", "Pocket Monsters", "포켓몬스터", "포켓몬", "ポケモン"], 90),
-    ("Metroid", "metroid", ["Metroid", "메트로이드", "メトロイド"], 80),
-    ("Animal Crossing", "animal-crossing", ["Animal Crossing", "동물의 숲", "동숲", "모동숲", "どうぶつの森"], 80),
-    ("Splatoon", "splatoon", ["Splatoon", "스플래툰", "スプラトゥーン"], 80),
-    ("Kirby", "kirby", ["Kirby", "별의 커비", "커비", "カービィ"], 75),
-    ("Fire Emblem", "fire-emblem", ["Fire Emblem", "파이어 엠블렘"], 70),
-    ("Xenoblade", "xenoblade", ["Xenoblade", "Xenoblade Chronicles", "제노블레이드", "제노블레이드 크로니클스"], 70),
-    ("Donkey Kong", "donkey-kong", ["Donkey Kong", "DK", "동키콩"], 75),
-    ("Rhythm Heaven", "rhythm-heaven", ["Rhythm Heaven", "리듬 천국", "리듬천국", "리듬 세상", "리듬세상", "リズム天国"], 70),
+    ("마리오", "mario", ["Mario", "Super Mario", "마리오", "슈퍼 마리오", "Mario Kart", "마리오 카트", "マリオ"], 90),
+    ("젤다의 전설", "zelda", ["The Legend of Zelda", "Zelda", "젤다의 전설", "젤다", "야숨", "왕눈", "ゼルダ"], 90),
+    ("포켓몬", "pokemon", ["Pokémon", "Pokemon", "Pocket Monsters", "포켓몬스터", "포켓몬", "ポケモン"], 90),
+    ("메트로이드", "metroid", ["Metroid", "메트로이드", "メトロイド"], 80),
+    ("동물의 숲", "animal-crossing", ["Animal Crossing", "동물의 숲", "동숲", "모동숲", "どうぶつの森"], 80),
+    ("스플래툰", "splatoon", ["Splatoon", "스플래툰", "スプラトゥーン"], 80),
+    ("별의 커비", "kirby", ["Kirby", "별의 커비", "커비", "カービィ"], 75),
+    ("파이어 엠블렘", "fire-emblem", ["Fire Emblem", "파이어 엠블렘"], 70),
+    ("제노블레이드", "xenoblade", ["Xenoblade", "Xenoblade Chronicles", "제노블레이드", "제노블레이드 크로니클스"], 70),
+    ("동키콩", "donkey-kong", ["Donkey Kong", "DK", "동키콩"], 75),
+    ("리듬 세상", "rhythm-heaven", ["Rhythm Heaven", "리듬 천국", "리듬천국", "리듬 세상", "리듬세상", "リズム天国"], 70),
 ]
 
 
 class Command(BaseCommand):
-    help = "Create or update default Nintendo Watch sources and franchises."
+    help = "Create or update default Nintendo Watch sources and game type names."
 
     def handle(self, *args, **options):
         source_created = 0
@@ -241,6 +241,6 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"Sources: {source_created} created, {source_updated} updated. "
-                f"Franchises: {franchise_created} created, {franchise_updated} updated."
+                f"Game types: {franchise_created} created, {franchise_updated} updated."
             )
         )

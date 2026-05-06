@@ -33,7 +33,7 @@
       {{ form.q }}
     </div>
     <div>
-      <label for="{{ form.franchise.id_for_label }}">프랜차이즈</label>
+      <label for="{{ form.franchise.id_for_label }}">게임종류</label>
       {{ form.franchise }}
     </div>
     <div>
@@ -80,14 +80,14 @@
           {{ form.date_to }}
         </div>
         <div>
-          <label>관심 프랜차이즈</label>
+          <label>관심 게임종류</label>
           {% if request.user.is_authenticated %}
             <label class="checkline" for="{{ form.favorites_only.id_for_label }}">
               {{ form.favorites_only }}
               관심작만 보기
             </label>
           {% else %}
-            <span class="checkline muted">로그인하면 읽음, 북마크, 관심 프랜차이즈를 저장할 수 있습니다.</span>
+            <span class="checkline muted">로그인하면 읽음, 북마크, 관심 게임종류를 저장할 수 있습니다.</span>
           {% endif %}
         </div>
       </div>
@@ -138,7 +138,7 @@
         {% if item.summary_ko|show_summary %}<p class="summary compact">{{ item.summary_ko }}</p>{% endif %}
         <div class="meta">
           <span>{{ item.source.name }}</span>
-          <span>{% if item.published_at %}게시 {{ item.published_at|date:"Y-m-d H:i" }} KST{% else %}게시일 미상{% endif %}</span>
+          <span>{% published_status item %}</span>
           <span>수집 {{ item.first_seen_at|timesince }} 전</span>
         </div>
         {% if item.franchise_links.all %}
@@ -153,6 +153,7 @@
             {% if forloop.first %}
               <div class="issue-strip">
                 <span class="badge {{ issue_link.issue.status }}">{{ issue_link.issue.status_ko }}</span>
+                {% if issue_link.issue.review_required %}<span class="badge state">검토 필요</span>{% endif %}
                 <a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title|truncatechars:90 }}</a>
                 <span class="muted">관련 {{ issue_link.issue_item_count }}건</span>
                 {% if issue_link.issue.official_confirmed_at %}
@@ -190,9 +191,9 @@
           <a class="btn" href="{% url 'news:item_list' %}">전체 뉴스 보기</a>
         </div>
       {% elif empty_state == "no_favorites" %}
-        <strong>관심 프랜차이즈를 설정하면 맞춤 타임라인을 볼 수 있습니다.</strong>
+        <strong>관심 게임종류를 설정하면 맞춤 타임라인을 볼 수 있습니다.</strong>
         <div class="button-row">
-          <a class="btn btn-primary" href="{% url 'news:franchise_favorites' %}">관심 프랜차이즈 설정</a>
+          <a class="btn btn-primary" href="{% url 'news:franchise_favorites' %}">관심 게임종류 설정</a>
           <a class="btn" href="{% url 'news:item_list' %}">전체 뉴스 보기</a>
         </div>
       {% elif empty_state == "no_search_results" %}
