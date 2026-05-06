@@ -304,6 +304,14 @@ docker compose exec -T web python manage.py export_summary_batch --limit 20 --ta
 
 `nintendowatch-summary-prompt.md` 내용을 ChatGPT 또는 Gemini 웹앱에 붙여넣으면 모델이 JSON만 반환하도록 지시합니다. 그 응답을 `nintendowatch-summary-result.json` 같은 파일로 저장한 뒤 먼저 dry-run으로 검증합니다.
 
+기본적으로 중요도 75점 이상 항목은 `summary_mode=detailed`로 내보냅니다. ChatGPT/Gemini 웹앱이 원문 URL을 열 수 있으면 `source_url`을 직접 확인해 `핵심 내용` bullet이 포함된 더 구체적인 요약을 만들도록 지시합니다. 75점 미만 항목은 기존처럼 간단한 4줄 요약으로 충분하게 처리합니다.
+
+상세 요약 기준을 바꾸고 싶으면:
+
+```bash
+docker compose exec -T web python manage.py export_summary_batch --limit 20 --target chatgpt --detailed-threshold 80 --show-skips > nintendowatch-summary-prompt.md
+```
+
 ```bash
 docker compose exec -T web python manage.py import_summary_batch --input - --dry-run < nintendowatch-summary-result.json
 ```

@@ -8,6 +8,7 @@ from news.models import NewsItem
 from news.services.quality import is_generic_summary
 from news.services.summary_batch import (
     DEFAULT_MIN_RAW_CHARS,
+    DETAILED_IMPORTANCE_THRESHOLD,
     build_summary_batch_prompt,
     should_export_for_summary,
     summary_export_rejection_reasons,
@@ -25,6 +26,7 @@ class Command(BaseCommand):
         parser.add_argument("--target", choices=["chatgpt", "gemini", "generic"], default="generic", help="Prompt target wording.")
         parser.add_argument("--max-source-chars", type=int, default=1800, help="Maximum raw excerpt characters per item.")
         parser.add_argument("--min-raw-chars", type=int, default=DEFAULT_MIN_RAW_CHARS, help="Skip items with shorter extracted text.")
+        parser.add_argument("--detailed-threshold", type=int, default=DETAILED_IMPORTANCE_THRESHOLD, help="Importance score threshold for detailed summaries.")
         parser.add_argument("--include-low-quality", action="store_true", help="Include hub/short/low-confidence items in the export.")
         parser.add_argument("--show-skips", action="store_true", help="Print skipped item reasons to stderr.")
 
@@ -72,6 +74,7 @@ class Command(BaseCommand):
             target=options["target"],
             max_source_chars=options["max_source_chars"],
             min_raw_chars=options["min_raw_chars"],
+            detailed_threshold=options["detailed_threshold"],
         )
         if skipped_quality:
             self.stderr.write(f"Exported {len(selected)} item(s); skipped low-quality items: {_format_counts(skipped_quality)}")

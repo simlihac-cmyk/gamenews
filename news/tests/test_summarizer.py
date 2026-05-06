@@ -149,7 +149,7 @@ class SummarizeItemsCommandTests(TestCase):
 
     def test_export_summary_batch_outputs_paste_ready_prompt(self):
         item = self.make_item()
-        NewsItem.objects.filter(pk=item.pk).update(summary_ko="")
+        NewsItem.objects.filter(pk=item.pk).update(summary_ko="", importance_score=80)
 
         out = StringIO()
         call_command("export_summary_batch", "--item", str(item.pk), "--target", "chatgpt", stdout=out)
@@ -161,6 +161,21 @@ class SummarizeItemsCommandTests(TestCase):
         self.assertIn(summary_token_for(item), prompt)
         self.assertIn("응답은 설명 없이", prompt)
         self.assertIn("quality_notes", prompt)
+        self.assertIn('"summary_mode": "detailed"', prompt)
+        self.assertIn('"web_research_recommended": true', prompt)
+        self.assertIn("source_url", prompt)
+        self.assertIn("핵심 내용:", prompt)
+
+    def test_export_summary_batch_marks_low_importance_as_brief(self):
+        item = self.make_item()
+        NewsItem.objects.filter(pk=item.pk).update(summary_ko="", importance_score=40)
+
+        out = StringIO()
+        call_command("export_summary_batch", "--item", str(item.pk), "--target", "chatgpt", stdout=out)
+
+        prompt = out.getvalue()
+        self.assertIn('"summary_mode": "brief"', prompt)
+        self.assertIn('"web_research_recommended": false', prompt)
 
     def test_export_summary_batch_skips_low_quality_hub_pages_by_default(self):
         good = self.make_item("Nintendo Switch 2 system update announced")
@@ -268,6 +283,30 @@ class SummarizeItemsCommandTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.summary_ko, summary)
         self.assertIn("updated=1", out.getvalue())
+
+    def test_import_summary_batch_preserves_detailed_summary_lines(self):
+        item = self.make_item()
+        NewsItem.objects.filter(pk=item.pk).update(summary_ko="", importance_score=85)
+        summary = (
+            "무슨 일?: Nintendo Switch 2 업데이트가 공식 공개됐습니다.\n"
+            "핵심 내용:\n"
+            "- 저장 데이터 이전 절차가 개선됐습니다.\n"
+            "- 컨트롤러 페어링과 계정 설정 흐름이 정리됐습니다.\n"
+            "- 공식 지원 페이지에서 세부 안내를 확인할 수 있습니다.\n"
+            "왜 중요?: 새 기기 초기 설정과 이관 과정에 직접 영향을 줍니다.\n"
+            "확인 상태: 공식 출처에서 확인된 내용입니다.\n"
+            "주의: 지역별 적용 시점은 원문 링크에서 확인하세요."
+        )
+        payload = {"summaries": [{"id": item.pk, "token": summary_token_for(item), "summary_ko": summary}]}
+
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "summaries.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            call_command("import_summary_batch", "--input", str(path), stdout=StringIO())
+
+        item.refresh_from_db()
+        self.assertEqual(item.summary_ko, summary)
+        self.assertIn("- 저장 데이터 이전 절차", item.summary_ko)
 
     def test_import_summary_batch_dry_run_does_not_update(self):
         item = self.make_item()
