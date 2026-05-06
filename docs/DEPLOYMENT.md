@@ -66,7 +66,7 @@ Host: gamenews.monosaccharide180.com
 X-Forwarded-Proto: https
 ```
 
-Point the domain or tunnel to the Mac mini service on port `8000`.
+Point the domain or tunnel to the Mac mini host port `8010`.
 
 ## Scheduled Fetch
 

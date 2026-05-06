@@ -6,7 +6,7 @@ services:
       - path: .env
         required: false
     ports:
-      - "8000:8000"
+      - "8010:8000"
     depends_on:
       - db
     restart: unless-stopped
