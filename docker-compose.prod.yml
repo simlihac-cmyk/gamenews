@@ -6,7 +6,7 @@ services:
       - path: .env
         required: false
     ports:
-      - "7974:7974"
+      - "127.0.0.1:7974:7974"
     depends_on:
       - db
     restart: unless-stopped
