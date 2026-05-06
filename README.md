@@ -276,6 +276,26 @@ COLLECTOR_TIMEOUT_SECONDS=10
 
 각 소스 HTTP 요청의 기본 타임아웃입니다. 너무 크게 잡으면 깨진 소스 하나가 오래 기다리게 되므로 10초 정도를 권장합니다.
 
+### 한국어 요약
+
+수집된 항목은 기본적으로 로컬 규칙 기반 한국어 요약을 생성합니다. 외부 API를 쓰지 않기 때문에 기본 설정에서는 비용이 들지 않습니다.
+
+```env
+SUMMARY_PROVIDER=rules
+```
+
+더 자연스러운 요약이 필요하면 OpenAI Responses API 기반 요약을 선택적으로 켤 수 있습니다.
+
+```env
+SUMMARY_PROVIDER=auto
+OPENAI_API_KEY=sk-...
+SUMMARY_OPENAI_MODEL=gpt-5-mini
+SUMMARY_TIMEOUT_SECONDS=20
+SUMMARY_MAX_SOURCE_CHARS=3000
+```
+
+`auto`는 OpenAI 요약이 실패하면 로컬 규칙 요약으로 자동 fallback합니다. `openai`도 실패 시 수집이 막히지 않도록 규칙 요약으로 fallback하되 경고 로그를 남깁니다.
+
 ### 백업 상태 경로
 
 상태 화면에서 최근 백업 파일을 확인할 때 쓰는 경로입니다.
@@ -320,6 +340,18 @@ docker compose exec web python manage.py fetch_news --limit 20 --dry-run
 
 ```bash
 docker compose exec web python manage.py recalculate_items
+```
+
+기존 항목의 한국어 요약만 다시 생성:
+
+```bash
+docker compose exec web python manage.py summarize_items --limit 100
+```
+
+이미 있는 요약까지 강제로 다시 만들려면:
+
+```bash
+docker compose exec web python manage.py summarize_items --force --provider auto --limit 100
 ```
 
 저중요 오래된 뉴스를 보관 처리:
@@ -492,7 +524,7 @@ YouTube RSS:
 ## 현재 한계
 
 - HTML 소스는 selector 품질에 따라 수집 정확도가 달라집니다.
-- 한국어 요약은 rule-based이며 외부 LLM API를 호출하지 않습니다.
+- 한국어 요약은 기본값이 rule-based입니다. `SUMMARY_PROVIDER=auto` 또는 `openai`를 설정하면 선택적으로 LLM 요약을 사용할 수 있습니다.
 - 이슈 그룹핑은 최근 14일 제목 토큰, 카테고리, 프랜차이즈 기반의 단순 규칙입니다.
 - YouTube Korea 소스는 공식 channel ID를 기록해 두었지만, 현재 YouTube RSS endpoint가 404를 반환하므로 기본 비활성입니다.
 - 검색은 아직 PostgreSQL full-text search가 아니라 단순 DB 검색입니다.

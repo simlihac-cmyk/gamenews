@@ -99,3 +99,9 @@ DISCORD_WEBHOOK_URL = env("DISCORD_WEBHOOK_URL", default="")
 NINTENDO_WATCH_USER_AGENT = "NintendoWatchBot/0.1 personal private archive"
 COLLECTOR_TIMEOUT_SECONDS = env.float("COLLECTOR_TIMEOUT_SECONDS", default=10.0)
 BACKUP_DIR = env("BACKUP_DIR", default=str(BASE_DIR / "backups" / "postgres"))
+
+SUMMARY_PROVIDER = env("SUMMARY_PROVIDER", default="rules")
+SUMMARY_OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+SUMMARY_OPENAI_MODEL = env("SUMMARY_OPENAI_MODEL", default="gpt-5-mini")
+SUMMARY_TIMEOUT_SECONDS = env.float("SUMMARY_TIMEOUT_SECONDS", default=20.0)
+SUMMARY_MAX_SOURCE_CHARS = env.int("SUMMARY_MAX_SOURCE_CHARS", default=3000)

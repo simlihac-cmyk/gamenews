@@ -164,7 +164,7 @@ class PublicPageSecurityAndSeoTests(TestCase):
         self.assertContains(response, reverse("news:privacy"))
         self.assertContains(response, reverse("news:terms"))
 
-    def test_detail_uses_fallback_summary_and_limits_public_excerpt(self):
+    def test_detail_uses_korean_summary_and_limits_public_excerpt(self):
         long_text = " ".join([f"Sentence {index} has Nintendo Switch 2 details." for index in range(40)])
         raw = RawItem.objects.create(
             source=self.source,
@@ -180,7 +180,8 @@ class PublicPageSecurityAndSeoTests(TestCase):
         response = self.client.get(reverse("news:item_detail", args=[item.pk]))
         html = response.content.decode()
 
-        self.assertContains(response, "아직 상세 요약은 없지만")
+        self.assertContains(response, "무슨 일?:")
+        self.assertContains(response, "왜 중요?:")
         self.assertContains(response, "원문 보기")
         excerpt = html.split('<div class="pre">', 1)[1].split("</div>", 1)[0]
         self.assertLessEqual(len(excerpt), 520)
