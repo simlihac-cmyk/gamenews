@@ -14,9 +14,11 @@
   </div>
   <div class="button-row">
     <a class="btn" href="{{ item.url }}" target="_blank" rel="noopener">원문</a>
-    <form method="post" action="{% url 'news:mark_read' item.pk %}">{% csrf_token %}<button type="submit">읽음</button></form>
-    <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}북마크 해제{% else %}북마크{% endif %}</button></form>
-    <form method="post" action="{% url 'news:recalculate_item' item.pk %}">{% csrf_token %}<button type="submit">재계산</button></form>
+    {% if request.user.is_authenticated %}
+      <form method="post" action="{% url 'news:mark_read' item.pk %}">{% csrf_token %}<button type="submit">읽음</button></form>
+      <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}북마크 해제{% else %}북마크{% endif %}</button></form>
+      <form method="post" action="{% url 'news:recalculate_item' item.pk %}">{% csrf_token %}<button type="submit">재계산</button></form>
+    {% endif %}
   </div>
 </div>
 

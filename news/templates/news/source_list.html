@@ -37,7 +37,11 @@
         <td>{{ source.last_new_items_count }}</td>
         <td>{{ source.item_count }}</td>
         <td>
-          <form method="post" action="{% url 'news:refresh_source' source.pk %}">{% csrf_token %}<button type="submit">새로고침</button></form>
+          {% if request.user.is_authenticated %}
+            <form method="post" action="{% url 'news:refresh_source' source.pk %}">{% csrf_token %}<button type="submit">새로고침</button></form>
+          {% else %}
+            <span class="muted">로그인 필요</span>
+          {% endif %}
         </td>
       </tr>
     {% empty %}

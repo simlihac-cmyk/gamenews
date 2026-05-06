@@ -561,6 +561,8 @@
             {% csrf_token %}
             <button type="submit">로그아웃</button>
           </form>
+        {% else %}
+          <a href="{% url 'login' %}">로그인</a>
         {% endif %}
       </nav>
     </div>

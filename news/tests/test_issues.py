@@ -208,3 +208,47 @@ class IssueGroupingTests(TestCase):
         response = self.client.get(reverse("news:item_list"), {"q": "Direct showcase"})
 
         self.assertContains(response, "Nintendo Direct showcase announced")
+
+    def test_read_pages_are_public_without_login(self):
+        raw_item = self.make_raw_item(
+            self.official_source,
+            "Nintendo Direct showcase announced",
+            "https://official.example/public-direct",
+        )
+        news_item, _created = process_raw_item(raw_item)
+        issue = news_item.issue_links.select_related("issue").get().issue
+
+        public_urls = [
+            reverse("news:item_list"),
+            reverse("news:item_detail", args=[news_item.pk]),
+            reverse("news:issue_list"),
+            reverse("news:issue_detail", args=[issue.pk]),
+            reverse("news:source_list"),
+            reverse("news:source_health"),
+            reverse("news:franchise_list"),
+            reverse("news:franchise_detail", args=[self.zelda.slug]),
+        ]
+
+        for url in public_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+
+        response = self.client.get(reverse("news:home"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("news:item_list"))
+
+    def test_mutating_actions_still_require_login(self):
+        raw_item = self.make_raw_item(
+            self.official_source,
+            "Nintendo Direct showcase announced",
+            "https://official.example/protected-action",
+        )
+        news_item, _created = process_raw_item(raw_item)
+
+        response = self.client.post(reverse("news:mark_read", args=[news_item.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith("/accounts/login/"))
+        news_item.refresh_from_db()
+        self.assertFalse(news_item.is_read)

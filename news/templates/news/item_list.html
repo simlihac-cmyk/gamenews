@@ -124,9 +124,11 @@
         <div class="card-actions">
           <a class="btn" href="{% url 'news:item_detail' item.pk %}">상세</a>
           <a class="btn" href="{{ item.url }}" target="_blank" rel="noopener">원문</a>
-          <form method="post" action="{% url 'news:mark_read' item.pk %}">{% csrf_token %}<button class="btn-quiet" type="submit">읽음</button></form>
-          <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}관심 해제{% else %}관심{% endif %}</button></form>
-          <form method="post" action="{% url 'news:archive_item' item.pk %}">{% csrf_token %}<button class="btn-danger" type="submit">보관</button></form>
+          {% if request.user.is_authenticated %}
+            <form method="post" action="{% url 'news:mark_read' item.pk %}">{% csrf_token %}<button class="btn-quiet" type="submit">읽음</button></form>
+            <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}관심 해제{% else %}관심{% endif %}</button></form>
+            <form method="post" action="{% url 'news:archive_item' item.pk %}">{% csrf_token %}<button class="btn-danger" type="submit">보관</button></form>
+          {% endif %}
         </div>
       </div>
     </article>
