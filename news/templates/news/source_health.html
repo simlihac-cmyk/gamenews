@@ -9,20 +9,20 @@
 </div>
 <div class="stat-grid">
   <div class="stat-card">
+    <strong>{{ totals.status }}</strong>
+    <span>수집 상태</span>
+  </div>
+  <div class="stat-card">
+    <strong>{{ totals.last_updated_at|date:"Y-m-d H:i"|default:"미확인" }}</strong>
+    <span>최근 업데이트</span>
+  </div>
+  <div class="stat-card">
     <strong>{{ totals.enabled }}</strong>
     <span>활성 출처</span>
   </div>
   <div class="stat-card">
-    <strong>{{ totals.disabled }}</strong>
-    <span>비활성 출처</span>
-  </div>
-  <div class="stat-card">
-    <strong>{{ totals.errors }}</strong>
-    <span>오류 출처</span>
-  </div>
-  <div class="stat-card">
-    <strong>{{ totals.stale }}</strong>
-    <span>24시간 이상 미성공</span>
+    <strong>{{ totals.recent_errors }}</strong>
+    <span>최근 오류</span>
   </div>
   <div class="stat-card">
     <strong>{{ totals.last_new }}</strong>
@@ -36,16 +36,16 @@
 <section class="card" style="margin-bottom: 14px;">
   <div class="badge-row">
     {% if backup_status.exists %}
-      <span class="badge confirmed">백업 정상</span>
+      <span class="badge confirmed">백업 {{ backup_status.status_label }}</span>
       <span class="badge">{{ backup_status.modified_at|date:"Y-m-d H:i" }}</span>
       <span class="badge">{{ backup_status.size_mb }} MB</span>
     {% else %}
-      <span class="badge debunked">백업 없음</span>
+      <span class="badge debunked">백업 {{ backup_status.status_label }}</span>
     {% endif %}
   </div>
-  <div class="muted" style="margin-top: 8px;">
-    {{ backup_status.directory }}{% if backup_status.filename %}/{{ backup_status.filename }}{% endif %}
-  </div>
+  {% if request.user.is_staff or request.user.is_superuser %}
+    <div class="muted" style="margin-top: 8px;"><a href="{% url 'news:source_health_internal' %}">관리자 상세 상태 보기</a></div>
+  {% endif %}
 </section>
 <table class="table">
   <thead>
@@ -83,7 +83,7 @@
         <td>{{ source.raw_count }}</td>
         <td>{{ source.item_count }}</td>
         <td>{{ source.last_new_items_count }}</td>
-        <td>{{ source.last_error|default:"-"|truncatechars:180 }}</td>
+        <td>{{ source.public_last_error|default:"-" }}</td>
       </tr>
     {% empty %}
       <tr><td colspan="8">출처가 없습니다.</td></tr>

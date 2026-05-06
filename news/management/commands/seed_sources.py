@@ -176,17 +176,17 @@ SOURCES = [
 ]
 
 FRANCHISES = [
-    ("Mario", "mario", ["Mario", "Super Mario", "마리오", "マリオ"], 90),
-    ("Zelda", "zelda", ["Zelda", "The Legend of Zelda", "젤다", "ゼルダ"], 90),
-    ("Pokémon", "pokemon", ["Pokemon", "Pokémon", "포켓몬", "ポケモン"], 90),
+    ("Mario", "mario", ["Mario", "Super Mario", "마리오", "슈퍼 마리오", "Mario Kart", "마리오 카트", "マリオ"], 90),
+    ("Zelda", "zelda", ["The Legend of Zelda", "Zelda", "젤다의 전설", "젤다", "야숨", "왕눈", "ゼルダ"], 90),
+    ("Pokémon", "pokemon", ["Pokémon", "Pokemon", "Pocket Monsters", "포켓몬스터", "포켓몬", "ポケモン"], 90),
     ("Metroid", "metroid", ["Metroid", "메트로이드", "メトロイド"], 80),
-    ("Animal Crossing", "animal-crossing", ["Animal Crossing", "동물의 숲", "どうぶつの森"], 80),
+    ("Animal Crossing", "animal-crossing", ["Animal Crossing", "동물의 숲", "동숲", "모동숲", "どうぶつの森"], 80),
     ("Splatoon", "splatoon", ["Splatoon", "스플래툰", "スプラトゥーン"], 80),
-    ("Kirby", "kirby", ["Kirby", "커비", "カービィ"], 75),
+    ("Kirby", "kirby", ["Kirby", "별의 커비", "커비", "カービィ"], 75),
     ("Fire Emblem", "fire-emblem", ["Fire Emblem", "파이어 엠블렘"], 70),
-    ("Xenoblade", "xenoblade", ["Xenoblade", "제노블레이드"], 70),
-    ("Donkey Kong", "donkey-kong", ["Donkey Kong", "동키콩"], 75),
-    ("Rhythm Heaven", "rhythm-heaven", ["Rhythm Heaven", "리듬 세상", "リズム天国"], 70),
+    ("Xenoblade", "xenoblade", ["Xenoblade", "Xenoblade Chronicles", "제노블레이드", "제노블레이드 크로니클스"], 70),
+    ("Donkey Kong", "donkey-kong", ["Donkey Kong", "DK", "동키콩"], 75),
+    ("Rhythm Heaven", "rhythm-heaven", ["Rhythm Heaven", "리듬 천국", "리듬천국", "리듬 세상", "리듬세상", "リズム天国"], 70),
 ]
 
 

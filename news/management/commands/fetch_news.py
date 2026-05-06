@@ -70,6 +70,9 @@ class Command(BaseCommand):
                     logger.exception("Failed to process raw item %s", raw_item.pk)
                     self.stderr.write(self.style.WARNING(f"  failed raw item {raw_item.pk}: {exc}"))
                     continue
+                if news_item is None:
+                    self.stdout.write(f"    - rejected raw item {raw_item.pk}: {raw_item.rejection_reason}")
+                    continue
 
                 if created:
                     total_news_created += 1

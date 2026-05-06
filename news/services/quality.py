@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import timedelta
+from urllib.parse import urlparse
+
+from news.models import PublishedAtPrecision, Source
+
+from .text import normalize_title, normalize_whitespace
+
+
+MIN_TITLE_LENGTH = 10
+LOW_CONFIDENCE_THRESHOLD = 50
+
+BOILERPLATE_TITLE_EXACT = {
+    "skip to main content",
+    "read more",
+    "shop all",
+    "characters hub",
+    "smart device games",
+    "monthly highlights",
+    "my nintendo store shop all",
+    "nintendo switch - oled model",
+    "nintendo switch – oled model",
+    "which nintendo switch is right for you",
+}
+
+BOILERPLATE_TITLE_CONTAINS = {
+    "shop all",
+    "characters hub",
+    "smart device games",
+    "skip to ",
+}
+
+GENERIC_SUMMARY_MARKERS = {
+    "해외 출처에서 감지된 닌텐도 관련 소식입니다",
+    "제목 기준으로",
+    "원제:",
+}
+
+ARTICLE_PATH_MARKERS = {
+    "/news",
+    "/article",
+    "/articles",
+    "/whatsnew",
+    "/topics",
+    "/release",
+    "/schedule",
+    "/game",
+    "/games",
+    "/event",
+    "/interview",
+    "/guide",
+    "/features",
+}
+
+
+@dataclass(frozen=True)
+class FranchiseMatch:
+    franchise: object
+    matched_alias: str
+    confidence_score: int
+
+
+def clean_title(title: str, source_slug: str | None = None) -> str:
+    value = normalize_whitespace(title)
+    value = re.sub(
+        r"^(?:\d{1,2}/\d{1,2}/\d{2,4}|\d{4}[.-]\d{1,2}[.-]\d{1,2})\s*[-–—:·|]?\s*",
+        "",
+        value,
+    )
+    value = re.sub(r"\s*\bRead more\b\s*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+뉴스\s+\d{4}[.-]\d{1,2}[.-]\d{1,2}\s*$", "", value)
+    value = normalize_whitespace(value)
+    return value
+
+
+def is_boilerplate_title(title: str, source: Source | None = None) -> bool:
+    normalized = normalize_whitespace(title).casefold()
+    if not normalized:
+        return True
+    if _title_is_allowed(normalized, source):
+        return False
+    ascii_dash = normalized.replace("–", "-").replace("—", "-")
+    if normalized in BOILERPLATE_TITLE_EXACT or ascii_dash in BOILERPLATE_TITLE_EXACT:
+        return True
+    if normalized.startswith("skip to"):
+        return True
+    if len(normalized) < MIN_TITLE_LENGTH:
+        return True
+    return any(marker in normalized for marker in BOILERPLATE_TITLE_CONTAINS)
+
+
+def article_rejection_reason(
+    *,
+    title: str,
+    url: str,
+    raw_text: str = "",
+    published_at=None,
+    source: Source | None = None,
+) -> str:
+    raw_title = normalize_whitespace(title)
+    display_title = clean_title(raw_title, getattr(source, "slug", None))
+    if not raw_title:
+        return "empty_title"
+    if is_boilerplate_title(raw_title, source) or is_boilerplate_title(display_title, source):
+        if not display_title or len(normalize_whitespace(display_title)) < MIN_TITLE_LENGTH:
+            return "too_short_title"
+        return "boilerplate_title"
+    if is_boilerplate_body(raw_text):
+        return "boilerplate_body"
+    if not _looks_like_article_url(url, source) and published_at is None:
+        return "non_article_url_without_date"
+    return ""
+
+
+def should_publish_item(
+    *,
+    title: str,
+    url: str,
+    raw_text: str = "",
+    published_at=None,
+    source: Source | None = None,
+    extraction_confidence: int | None = None,
+) -> bool:
+    if article_rejection_reason(title=title, url=url, raw_text=raw_text, published_at=published_at, source=source):
+        return False
+    if extraction_confidence is not None and extraction_confidence < LOW_CONFIDENCE_THRESHOLD:
+        return False
+    return True
+
+
+def extraction_confidence_for(
+    *,
+    title: str,
+    url: str,
+    raw_text: str = "",
+    published_at=None,
+    source: Source | None = None,
+    franchise_count: int = 0,
+) -> int:
+    if article_rejection_reason(title=title, url=url, raw_text=raw_text, published_at=published_at, source=source):
+        return 0
+
+    score = 100
+    cleaned = clean_title(title, getattr(source, "slug", None))
+    if len(normalize_whitespace(cleaned)) < 18:
+        score -= 25
+    if published_at is None:
+        score -= 15
+    if not _looks_like_article_url(url, source):
+        score -= 20
+    if is_boilerplate_body(raw_text):
+        score -= 30
+    if franchise_count >= 5:
+        score -= 25
+    return max(0, min(100, score))
+
+
+def is_generic_summary(summary: str) -> bool:
+    value = normalize_whitespace(summary)
+    if not value:
+        return True
+    return sum(1 for marker in GENERIC_SUMMARY_MARKERS if marker in value) >= 2
+
+
+def is_backfill_item(published_at, first_seen_at, *, days: int = 14) -> bool:
+    if not published_at or not first_seen_at:
+        return False
+    return first_seen_at - published_at >= timedelta(days=days)
+
+
+def precision_for_datetime(value, raw_text: str = "") -> str:
+    if value is None:
+        return PublishedAtPrecision.UNKNOWN
+    raw = normalize_whitespace(raw_text)
+    if raw and re.fullmatch(r"(?:\d{4}[.-]\d{1,2}[.-]\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4}|[A-Za-z]+ \d{1,2},? \d{4})", raw):
+        return PublishedAtPrecision.DATE_ONLY
+    return PublishedAtPrecision.EXACT
+
+
+def _title_is_allowed(normalized_title: str, source: Source | None) -> bool:
+    if source is None:
+        return False
+    config = source.config or {}
+    allow_exact = {normalize_whitespace(str(value)).casefold() for value in config.get("quality_allow_titles", [])}
+    if normalized_title in allow_exact:
+        return True
+    return any(re.search(str(pattern), normalized_title, flags=re.IGNORECASE) for pattern in config.get("quality_allow_title_patterns", []))
+
+
+def is_boilerplate_body(raw_text: str) -> bool:
+    value = normalize_whitespace(raw_text).casefold()
+    if not value:
+        return False
+    if value in BOILERPLATE_TITLE_EXACT:
+        return True
+    if len(value) <= 120 and any(marker in value for marker in BOILERPLATE_TITLE_CONTAINS):
+        return True
+    nav_hits = sum(1 for marker in ("shop all", "characters hub", "smart device games", "my nintendo store") if marker in value)
+    return nav_hits >= 2
+
+
+def _looks_like_article_url(url: str, source: Source | None = None) -> bool:
+    parsed = urlparse(url)
+    path = (parsed.path or "").lower()
+    if not path:
+        return False
+    config = source.config or {}
+    if source is not None and source.source_type in {"rss", "youtube_rss", "reddit_rss", "google_alert_rss"}:
+        return path not in {"", "/"}
+    include_patterns = [str(value).lower() for value in config.get("url_include_patterns", [])]
+    if include_patterns:
+        return any(pattern in path for pattern in include_patterns)
+    if any(marker in path for marker in ARTICLE_PATH_MARKERS):
+        return True
+    title_path = normalize_title(path.replace("/", " "))
+    return len(title_path.split()) >= 3

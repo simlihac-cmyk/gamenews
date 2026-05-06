@@ -1,5 +1,7 @@
 from django import template
 
+from news.services.quality import is_generic_summary
+
 register = template.Library()
 
 
@@ -61,3 +63,8 @@ def category_class(value: str) -> str:
 @register.filter
 def relation_label(value: str) -> str:
     return RELATION_LABELS.get(value, value)
+
+
+@register.filter
+def show_summary(value: str) -> bool:
+    return bool(value and not is_generic_summary(value))

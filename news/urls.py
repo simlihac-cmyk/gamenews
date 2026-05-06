@@ -18,6 +18,10 @@ urlpatterns = [
     path("sources/", views.source_list, name="source_list"),
     path("sources/<int:pk>/refresh/", login_required(views.refresh_source), name="refresh_source"),
     path("sources/health/", views.source_health, name="source_health"),
+    path("sources/health/internal/", views.source_health_internal, name="source_health_internal"),
     path("franchises/", views.franchise_list, name="franchise_list"),
+    path("franchises/favorites/", views.franchise_favorites, name="franchise_favorites"),
     path("franchises/<slug:slug>/", views.franchise_detail, name="franchise_detail"),
+    path("sitemap.xml", views.sitemap_xml, name="sitemap_xml"),
+    path("robots.txt", views.robots_txt, name="robots_txt"),
 ]

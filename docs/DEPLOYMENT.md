@@ -88,3 +88,14 @@ Create a PostgreSQL dump:
 ```
 
 Keep the `backups/` directory out of Git.
+
+## Admin login hardening TODO
+
+The Django admin URL is hidden from public navigation, but the admin endpoint itself still exists at `/admin/`.
+For production, add one of the following before exposing the service broadly:
+
+- reverse-proxy rate limiting for `/admin/` and `/accounts/login/`
+- `django-axes` with a persistent cache/database backend
+- 2FA for staff accounts
+
+Do not commit secrets, database URLs, or backup paths into templates or public status pages.

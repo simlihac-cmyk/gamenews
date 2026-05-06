@@ -1,0 +1,28 @@
+{% extends "news/base.html" %}
+{% block title %}관심 프랜차이즈 - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>관심 프랜차이즈</h1>
+    <div class="muted">관심작만 보기 필터에 사용할 프랜차이즈를 선택합니다.</div>
+  </div>
+</div>
+
+<form method="post" class="card">
+  {% csrf_token %}
+  <div class="stack">
+    {% for franchise in franchises %}
+      <label class="checkline" for="favorite-{{ franchise.pk }}">
+        <input id="favorite-{{ franchise.pk }}" type="checkbox" name="franchises" value="{{ franchise.pk }}"{% if franchise.pk in favorite_ids %} checked{% endif %}>
+        {{ franchise.name }} · {{ franchise.item_count }}건
+      </label>
+    {% empty %}
+      <div class="muted">프랜차이즈가 없습니다.</div>
+    {% endfor %}
+  </div>
+  <div class="button-row" style="margin-top: 14px;">
+    <button class="btn-primary" type="submit">저장</button>
+    <a class="btn" href="{% url 'news:item_list' %}?favorites_only=on">관심작 타임라인 보기</a>
+  </div>
+</form>
+{% endblock %}

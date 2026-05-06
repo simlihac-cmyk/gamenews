@@ -16,8 +16,11 @@
       <th>지역</th>
       <th>사용</th>
       <th>성공</th>
+      <th>마지막 확인</th>
       <th>최근 신규</th>
+      <th>원본</th>
       <th>항목</th>
+      <th>평균 시간</th>
       <th>동작</th>
     </tr>
   </thead>
@@ -27,15 +30,18 @@
         <td>
           <strong>{{ source.name }}</strong><br>
           <span class="muted">{{ source.slug }}</span>
-          {% if source.last_error %}<div class="muted">{{ source.last_error|truncatechars:160 }}</div>{% endif %}
+          {% if source.public_last_error %}<div class="muted">{{ source.public_last_error }}</div>{% endif %}
         </td>
         <td>{{ source.source_type }}</td>
         <td>{{ source.trust_type_ko }}</td>
         <td>{{ source.region }}</td>
         <td>{% if source.enabled %}예{% else %}아니오{% endif %}</td>
         <td>{{ source.last_success_at|date:"Y-m-d H:i"|default:"없음" }}</td>
+        <td>{{ source.last_checked_at|date:"Y-m-d H:i"|default:"없음" }}</td>
         <td>{{ source.last_new_items_count }}</td>
+        <td>{{ source.raw_count }}</td>
         <td>{{ source.item_count }}</td>
+        <td>{{ source.average_fetch_duration_seconds|floatformat:2|default:"-" }}s</td>
         <td>
           {% if request.user.is_authenticated %}
             <form method="post" action="{% url 'news:refresh_source' source.pk %}">{% csrf_token %}<button type="submit">새로고침</button></form>
@@ -45,7 +51,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="9">출처가 없습니다.</td></tr>
+      <tr><td colspan="12">출처가 없습니다.</td></tr>
     {% endfor %}
   </tbody>
 </table>

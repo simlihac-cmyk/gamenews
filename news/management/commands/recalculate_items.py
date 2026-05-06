@@ -32,6 +32,9 @@ class Command(BaseCommand):
                 logger.exception("Failed to recalculate item %s", news_item.pk)
                 self.stderr.write(self.style.WARNING(f"Failed item {news_item.pk}: {exc}"))
                 continue
+            if updated is None:
+                self.stdout.write(f"Rejected {news_item.pk}: {news_item.raw_item.rejection_reason}")
+                continue
             count += 1
             self.stdout.write(f"Updated {updated.pk}: {updated.title} ({updated.importance_score})")
 

@@ -5,6 +5,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Nintendo Watch{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}{{ seo_description|default:'닌텐도 공식 뉴스, 보도, 루머, 발매일, Direct 소식을 출처와 이슈 흐름별로 모아보는 비공식 뉴스 모니터링 사이트입니다.' }}{% endblock %}">
+  <meta name="robots" content="{{ seo_robots|default:'index,follow' }}">
+  {% if seo_canonical_url %}<link rel="canonical" href="{{ seo_canonical_url }}">{% endif %}
   <style>
     :root {
       color-scheme: light;
@@ -202,6 +205,11 @@
     .quick-tabs a:hover {
       border-color: var(--accent);
       background: var(--accent-soft);
+    }
+    .quick-tabs a[aria-current="page"] {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
     }
     .button-row {
       display: flex;
@@ -521,10 +529,37 @@
       gap: 8px;
       margin-top: 18px;
     }
+    .footer {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 22px 20px 32px;
+      color: var(--muted);
+      font-size: 13px;
+      border-top: 1px solid var(--line);
+    }
+    details.advanced-filter {
+      grid-column: 1 / -1;
+    }
+    details.advanced-filter summary {
+      cursor: pointer;
+      font-weight: 900;
+      color: #344054;
+    }
+    .filter-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .empty-state {
+      display: grid;
+      gap: 10px;
+    }
     @media (max-width: 860px) {
       .topbar-inner, .page-head { align-items: flex-start; flex-direction: column; }
       .nav { justify-content: flex-start; }
       .filter { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .span-2 { grid-column: span 2; }
       .grid-2 { grid-template-columns: 1fr; }
       .timeline-card { grid-template-columns: 1fr; }
@@ -539,6 +574,7 @@
     }
     @media (max-width: 560px) {
       .filter { grid-template-columns: 1fr; }
+      .filter-grid { grid-template-columns: 1fr; }
       .span-2 { grid-column: span 1; }
       .stat-grid { grid-template-columns: 1fr; }
       .item-title { font-size: 17px; }
@@ -555,7 +591,9 @@
         <a href="{% url 'news:source_list' %}">출처</a>
         <a href="{% url 'news:source_health' %}">상태</a>
         <a href="{% url 'news:franchise_list' %}">프랜차이즈</a>
-        <a href="/admin/">관리자</a>
+        {% if request.user.is_staff or request.user.is_superuser %}
+          <a href="/admin/">관리자</a>
+        {% endif %}
         {% if request.user.is_authenticated %}
           <form method="post" action="{% url 'logout' %}">
             {% csrf_token %}
@@ -577,5 +615,8 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="footer">
+    Nintendo Watch는 비공식 뉴스 모니터링/아카이브입니다. Nintendo 및 관련 상표는 각 권리자에게 있습니다.
+  </footer>
 </body>
 </html>

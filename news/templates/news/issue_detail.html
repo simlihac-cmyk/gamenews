@@ -27,8 +27,10 @@
       <div class="timeline-dot">{{ forloop.counter }}</div>
       <div class="card">
         <div class="badge-row">
-          <span class="badge {{ link.news_item.trust_label }}">{{ link.news_item.trust_label_ko }}</span>
-          <span class="badge {{ link.news_item.category|category_class }}">{{ link.news_item.category_ko }}</span>
+          <span class="badge {{ link.news_item.trust_label }}">{% if link.news_item.trust_label == "official" %}공식 출처{% else %}{{ link.news_item.trust_label_ko }}{% endif %}</span>
+          {% if link.news_item.category != "official" and link.news_item.category != "general" %}
+            <span class="badge {{ link.news_item.category|category_class }}">{{ link.news_item.category_ko }}</span>
+          {% endif %}
           <span class="badge">{{ link.relation|relation_label }}</span>
           {% if link.relation == "confirmation" %}<span class="badge confirmed">공식 확인</span>{% endif %}
           {% for tag in link.news_item.detected_tags %}
@@ -38,18 +40,20 @@
           {% endfor %}
         </div>
         <h2 class="item-title"><a href="{% url 'news:item_detail' link.news_item.pk %}">{{ link.news_item.title }}</a></h2>
-        <p class="summary compact">{{ link.news_item.summary_ko }}</p>
+        {% if link.news_item.summary_ko|show_summary %}<p class="summary compact">{{ link.news_item.summary_ko }}</p>{% endif %}
         <div class="meta">
           <span>{{ link.news_item.source.name }}</span>
-          <span>{{ link.news_item.first_seen_at|date:"Y-m-d H:i" }}</span>
+          <span>{% if link.news_item.published_at %}게시 {{ link.news_item.published_at|date:"Y-m-d H:i" }}{% else %}게시일 미상{% endif %}</span>
+          <span>수집 {{ link.news_item.first_seen_at|date:"Y-m-d H:i" }}</span>
           <span>중요도 {{ link.news_item.importance_score }}</span>
+          {% if link.explanation %}<span>{{ link.explanation }}</span>{% endif %}
           {% for franchise_link in link.news_item.franchise_links.all %}
             <span>{{ franchise_link.franchise.name }}</span>
           {% endfor %}
         </div>
         <div class="button-row" style="margin-top: 12px;">
-          <a class="btn" href="{% url 'news:item_detail' link.news_item.pk %}">상세</a>
-          <a class="btn" href="{{ link.news_item.url }}" target="_blank" rel="noopener">원문</a>
+          <a class="btn" href="{% url 'news:item_detail' link.news_item.pk %}" aria-label="상세 보기: {{ link.news_item.title }}">상세</a>
+          <a class="btn" href="{{ link.news_item.url }}" target="_blank" rel="noopener" aria-label="원문 보기: {{ link.news_item.source.name }}의 {{ link.news_item.title }}">원문</a>
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -72,6 +73,12 @@ class IssueRelation(models.TextChoices):
     RELATED = "related", "Related"
 
 
+class PublishedAtPrecision(models.TextChoices):
+    EXACT = "exact", "Exact"
+    DATE_ONLY = "date_only", "Date only"
+    UNKNOWN = "unknown", "Unknown"
+
+
 class NotificationChannel(models.TextChoices):
     NTFY = "ntfy", "ntfy"
     DISCORD = "discord", "Discord"
@@ -110,6 +117,8 @@ class Source(models.Model):
     last_success_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
     last_new_items_count = models.PositiveIntegerField(default=0)
+    last_fetch_duration_seconds = models.FloatField(null=True, blank=True)
+    average_fetch_duration_seconds = models.FloatField(null=True, blank=True)
     config = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -147,11 +156,20 @@ class RawItem(models.Model):
     canonical_url = models.URLField(max_length=1000, null=True, blank=True)
     author = models.CharField(max_length=255, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
+    raw_published_at_text = models.CharField(max_length=255, blank=True)
+    published_at_precision = models.CharField(
+        max_length=32,
+        choices=PublishedAtPrecision.choices,
+        default=PublishedAtPrecision.UNKNOWN,
+    )
     first_seen_at = models.DateTimeField(default=timezone.now)
     collected_at = models.DateTimeField(default=timezone.now)
     raw_html = models.TextField(blank=True)
     raw_text = models.TextField(blank=True)
     content_hash = models.CharField(max_length=64, db_index=True)
+    canonical_url_hash = models.CharField(max_length=64, blank=True, db_index=True)
+    extraction_confidence = models.PositiveSmallIntegerField(default=100)
+    rejection_reason = models.CharField(max_length=80, blank=True, db_index=True)
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -168,6 +186,8 @@ class RawItem(models.Model):
             models.Index(fields=["first_seen_at"]),
             models.Index(fields=["source"]),
             models.Index(fields=["content_hash"]),
+            models.Index(fields=["canonical_url_hash"]),
+            models.Index(fields=["rejection_reason"]),
         ]
 
     def __str__(self) -> str:
@@ -191,7 +211,16 @@ class NewsItem(models.Model):
     region = models.CharField(max_length=16, choices=Region.choices, default=Region.GLOBAL)
     language = models.CharField(max_length=16, choices=Language.choices, default=Language.MULTI)
     published_at = models.DateTimeField(null=True, blank=True)
+    published_at_precision = models.CharField(
+        max_length=32,
+        choices=PublishedAtPrecision.choices,
+        default=PublishedAtPrecision.UNKNOWN,
+    )
     first_seen_at = models.DateTimeField(default=timezone.now)
+    is_backfill = models.BooleanField(default=False)
+    canonical_url_hash = models.CharField(max_length=64, blank=True, db_index=True)
+    extraction_confidence = models.PositiveSmallIntegerField(default=100)
+    importance_reasons = models.JSONField(default=list, blank=True)
     thumbnail_url = models.URLField(max_length=1000, blank=True)
     is_read = models.BooleanField(default=False)
     is_bookmarked = models.BooleanField(default=False)
@@ -215,6 +244,8 @@ class NewsItem(models.Model):
             models.Index(fields=["published_at"]),
             models.Index(fields=["first_seen_at"]),
             models.Index(fields=["source"]),
+            models.Index(fields=["canonical_url_hash"]),
+            models.Index(fields=["extraction_confidence", "is_archived"]),
         ]
 
     def __str__(self) -> str:
@@ -281,6 +312,8 @@ class NewsItemIssue(models.Model):
     news_item = models.ForeignKey(NewsItem, on_delete=models.CASCADE, related_name="issue_links")
     issue = models.ForeignKey(Issue, on_delete=models.CASCADE, related_name="news_links")
     relation = models.CharField(max_length=32, choices=IssueRelation.choices, default=IssueRelation.RELATED)
+    relation_confidence = models.FloatField(default=0.0)
+    explanation = models.TextField(blank=True)
 
     class Meta:
         constraints = [
@@ -307,6 +340,8 @@ class Franchise(models.Model):
 class NewsItemFranchise(models.Model):
     news_item = models.ForeignKey(NewsItem, on_delete=models.CASCADE, related_name="franchise_links")
     franchise = models.ForeignKey(Franchise, on_delete=models.CASCADE, related_name="news_links")
+    matched_alias = models.CharField(max_length=255, blank=True)
+    confidence_score = models.PositiveSmallIntegerField(default=100)
 
     class Meta:
         constraints = [
@@ -315,6 +350,23 @@ class NewsItemFranchise(models.Model):
 
     def __str__(self) -> str:
         return f"{self.news_item} -> {self.franchise}"
+
+
+class UserFranchiseFavorite(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="franchise_favorites")
+    franchise = models.ForeignKey(Franchise, on_delete=models.CASCADE, related_name="user_favorites")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "franchise"], name="unique_user_franchise_favorite"),
+        ]
+        indexes = [
+            models.Index(fields=["user", "franchise"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user} -> {self.franchise}"
 
 
 class Notification(models.Model):

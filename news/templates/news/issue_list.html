@@ -11,7 +11,7 @@
 
 <div class="quick-tabs">
   {% for status_value, status_label in status_filters %}
-    <a href="{% url 'news:issue_list' %}{% if status_value %}?status={{ status_value }}{% endif %}">{{ status_label }}</a>
+    <a href="{% url 'news:issue_list' %}{% if status_value %}?status={{ status_value }}{% endif %}"{% if selected_status == status_value %} aria-current="page"{% endif %}>{{ status_label }}</a>
   {% endfor %}
 </div>
 

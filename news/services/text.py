@@ -103,6 +103,12 @@ def create_content_hash(title: str, canonical_url: str = "") -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def create_url_hash(url: str) -> str:
+    if not url:
+        return ""
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
 def strip_html(html: str) -> str:
     if not html:
         return ""

@@ -37,6 +37,10 @@ class NewsItemFilterForm(forms.Form):
         ("true", "북마크"),
         ("false", "북마크 아님"),
     )
+    SORT_CHOICES = (
+        ("published", "게시일순"),
+        ("detected", "수집순"),
+    )
 
     q = forms.CharField(required=False, label="검색")
     trust_label = forms.ChoiceField(required=False, choices=TRUST_LABEL_CHOICES_KO, label="신뢰도")
@@ -49,6 +53,7 @@ class NewsItemFilterForm(forms.Form):
     min_importance = forms.IntegerField(required=False, min_value=0, max_value=100, label="최소 중요도")
     date_from = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label="시작일")
     date_to = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label="종료일")
+    sort = forms.ChoiceField(required=False, choices=SORT_CHOICES, label="정렬")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

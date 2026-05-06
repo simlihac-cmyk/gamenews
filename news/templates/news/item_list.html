@@ -11,7 +11,7 @@
 
 <div class="quick-tabs">
   {% for quick_filter in quick_filters %}
-    <a href="{% url 'news:item_list' %}{% if quick_filter.query %}?{{ quick_filter.query }}{% endif %}">{{ quick_filter.label }}</a>
+    <a href="{% url 'news:item_list' %}{% if quick_filter.query %}?{{ quick_filter.query }}{% endif %}"{% if quick_filter.active %} aria-current="page"{% endif %}>{{ quick_filter.label }}</a>
   {% endfor %}
 </div>
 
@@ -21,52 +21,65 @@
     {{ form.q }}
   </div>
   <div>
-    <label for="{{ form.trust_label.id_for_label }}">신뢰도</label>
-    {{ form.trust_label }}
-  </div>
-  <div>
-    <label for="{{ form.category.id_for_label }}">카테고리</label>
-    {{ form.category }}
-  </div>
-  <div>
-    <label for="{{ form.source.id_for_label }}">출처</label>
-    {{ form.source }}
-  </div>
-  <div>
     <label for="{{ form.franchise.id_for_label }}">프랜차이즈</label>
     {{ form.franchise }}
   </div>
   <div>
-    <label for="{{ form.is_read.id_for_label }}">읽음</label>
-    {{ form.is_read }}
-  </div>
-  <div>
-    <label for="{{ form.is_bookmarked.id_for_label }}">북마크</label>
-    {{ form.is_bookmarked }}
+    <label for="{{ form.sort.id_for_label }}">정렬</label>
+    {{ form.sort }}
   </div>
   <div>
     <label for="{{ form.min_importance.id_for_label }}">최소 중요도</label>
     {{ form.min_importance }}
   </div>
-  <div>
-    <label>관심작</label>
-    <label class="checkline" for="{{ form.favorites_only.id_for_label }}">
-      {{ form.favorites_only }}
-      관심작만 보기
-    </label>
-  </div>
-  <div>
-    <label for="{{ form.date_from.id_for_label }}">시작일</label>
-    {{ form.date_from }}
-  </div>
-  <div>
-    <label for="{{ form.date_to.id_for_label }}">종료일</label>
-    {{ form.date_to }}
-  </div>
   <div class="filter-actions">
     <button class="btn-primary" type="submit">적용</button>
     <a class="btn" href="{% url 'news:item_list' %}">초기화</a>
   </div>
+  <details class="advanced-filter"{% if has_filter_params %} open{% endif %}>
+    <summary>상세 필터</summary>
+    <div class="filter-grid">
+      <div>
+        <label for="{{ form.trust_label.id_for_label }}">신뢰도</label>
+        {{ form.trust_label }}
+      </div>
+      <div>
+        <label for="{{ form.category.id_for_label }}">카테고리</label>
+        {{ form.category }}
+      </div>
+      <div>
+        <label for="{{ form.source.id_for_label }}">출처</label>
+        {{ form.source }}
+      </div>
+      <div>
+        <label for="{{ form.is_read.id_for_label }}">읽음</label>
+        {{ form.is_read }}
+      </div>
+      <div>
+        <label for="{{ form.is_bookmarked.id_for_label }}">북마크</label>
+        {{ form.is_bookmarked }}
+      </div>
+      <div>
+        <label for="{{ form.date_from.id_for_label }}">시작일</label>
+        {{ form.date_from }}
+      </div>
+      <div>
+        <label for="{{ form.date_to.id_for_label }}">종료일</label>
+        {{ form.date_to }}
+      </div>
+      <div>
+        <label>관심 프랜차이즈</label>
+        {% if request.user.is_authenticated %}
+          <label class="checkline" for="{{ form.favorites_only.id_for_label }}">
+            {{ form.favorites_only }}
+            관심작만 보기
+          </label>
+        {% else %}
+          <span class="checkline muted">로그인 필요</span>
+        {% endif %}
+      </div>
+    </div>
+  </details>
 </form>
 
 <div class="stack">
@@ -75,22 +88,26 @@
       <div class="item-main">
         <div class="badge-row">
           {% if item.importance_score >= 80 %}<span class="badge important">중요</span>{% endif %}
-          <span class="badge {{ item.trust_label }}">{{ item.trust_label_ko }}</span>
-          <span class="badge {{ item.category|category_class }}">{{ item.category_ko }}</span>
+          <span class="badge {{ item.trust_label }}">{% if item.trust_label == "official" %}공식 출처{% else %}{{ item.trust_label_ko }}{% endif %}</span>
+          {% if item.category != "official" and item.category != "general" %}
+            <span class="badge {{ item.category|category_class }}">{{ item.category_ko }}</span>
+          {% endif %}
           {% for tag in item.detected_tags %}
             {% if tag == "direct" or tag == "release_date" or tag == "trailer" or tag == "switch2" %}
               <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>
             {% endif %}
           {% endfor %}
-          {% if item.is_bookmarked %}<span class="badge reported">관심작</span>{% endif %}
+          {% if item.is_backfill %}<span class="badge state">과거 기사 수집</span>{% endif %}
+          {% if not item.published_at %}<span class="badge state">게시일 미상</span>{% endif %}
+          {% if item.is_bookmarked %}<span class="badge reported">북마크</span>{% endif %}
           {% if item.is_read %}<span class="badge state">읽음</span>{% endif %}
         </div>
         <h2 class="item-title"><a href="{% url 'news:item_detail' item.pk %}">{{ item.title }}</a></h2>
-        <p class="summary compact">{{ item.summary_ko }}</p>
+        {% if item.summary_ko|show_summary %}<p class="summary compact">{{ item.summary_ko }}</p>{% endif %}
         <div class="meta">
           <span>{{ item.source.name }}</span>
-          <span>게시 {{ item.published_at|date:"Y-m-d H:i"|default:"미상" }}</span>
-          <span>감지 {{ item.first_seen_at|date:"Y-m-d H:i" }}</span>
+          <span>{% if item.published_at %}게시 {{ item.published_at|date:"Y-m-d H:i" }}{% else %}게시일 미상{% endif %}</span>
+          <span>수집 {{ item.first_seen_at|date:"Y-m-d H:i" }}</span>
         </div>
         {% if item.franchise_links.all %}
           <div class="franchise-row">
@@ -122,18 +139,39 @@
           </div>
         </div>
         <div class="card-actions">
-          <a class="btn" href="{% url 'news:item_detail' item.pk %}">상세</a>
-          <a class="btn" href="{{ item.url }}" target="_blank" rel="noopener">원문</a>
+          <a class="btn" href="{% url 'news:item_detail' item.pk %}" aria-label="상세 보기: {{ item.title }}">상세</a>
+          <a class="btn" href="{{ item.url }}" target="_blank" rel="noopener" aria-label="원문 보기: {{ item.source.name }}의 {{ item.title }}">원문</a>
           {% if request.user.is_authenticated %}
             <form method="post" action="{% url 'news:mark_read' item.pk %}">{% csrf_token %}<button class="btn-quiet" type="submit">읽음</button></form>
-            <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}관심 해제{% else %}관심{% endif %}</button></form>
+            <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}북마크 해제{% else %}북마크{% endif %}</button></form>
             <form method="post" action="{% url 'news:archive_item' item.pk %}">{% csrf_token %}<button class="btn-danger" type="submit">보관</button></form>
           {% endif %}
         </div>
       </div>
     </article>
   {% empty %}
-    <div class="card">아직 수집된 항목이 없습니다.</div>
+    <div class="card empty-state">
+      {% if empty_state == "login_required_favorites" %}
+        <strong>관심작을 보려면 로그인이 필요합니다.</strong>
+        <div class="button-row">
+          <a class="btn btn-primary" href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">로그인</a>
+          <a class="btn" href="{% url 'news:item_list' %}">전체 뉴스 보기</a>
+        </div>
+      {% elif empty_state == "no_favorites" %}
+        <strong>관심 프랜차이즈를 설정하면 맞춤 타임라인을 볼 수 있습니다.</strong>
+        <div class="button-row">
+          <a class="btn btn-primary" href="{% url 'news:franchise_favorites' %}">관심 프랜차이즈 설정</a>
+          <a class="btn" href="{% url 'news:item_list' %}">전체 뉴스 보기</a>
+        </div>
+      {% elif empty_state == "no_search_results" %}
+        <strong>조건에 맞는 뉴스가 없습니다.</strong>
+      {% elif empty_state == "no_filter_results" %}
+        <strong>조건에 맞는 뉴스가 없습니다.</strong>
+        <a class="btn" href="{% url 'news:item_list' %}">전체 뉴스 보기</a>
+      {% else %}
+        <strong>아직 수집된 항목이 없습니다.</strong>
+      {% endif %}
+    </div>
   {% endfor %}
 </div>
 

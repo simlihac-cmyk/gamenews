@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import difflib
 import json
 import logging
 import time
@@ -25,21 +26,31 @@ from news.models import (
     NewsItem,
     NewsItemFranchise,
     NewsItemIssue,
+    PublishedAtPrecision,
     RawItem,
     Source,
     SourceType,
     TrustLabel,
 )
 
-from .classifier import classify_item, detect_franchises
+from .classifier import classify_item, detect_franchise_matches
 from .dedupe import content_hash_for, find_existing_news_item, find_existing_raw_item
-from .importance import calculate_importance
+from .importance import calculate_importance_with_reasons
+from .quality import (
+    LOW_CONFIDENCE_THRESHOLD,
+    article_rejection_reason,
+    clean_title,
+    extraction_confidence_for,
+    is_backfill_item,
+    precision_for_datetime,
+)
 from .summarizer import summarize_item
 from .text import (
     canonical_topic_from_title,
     normalize_title,
     normalize_url,
     normalize_whitespace,
+    create_url_hash,
     strip_html,
     tokenize_topic,
     truncate,
@@ -78,6 +89,35 @@ RELATED_CATEGORY_GROUPS = [
         NewsCategory.GENERAL,
     },
 ]
+BROAD_ISSUE_TOKENS = {
+    "nintendo",
+    "switch",
+    "switch2",
+    "official",
+    "confirmed",
+    "direct",
+    "eshop",
+    "news",
+    "update",
+    "updates",
+    "trailer",
+    "sale",
+    "sales",
+    "game",
+    "games",
+    "닌텐도",
+    "스위치",
+    "공식",
+    "뉴스",
+}
+
+
+@dataclass(frozen=True)
+class IssueMatch:
+    issue: Issue
+    relation: str
+    confidence: float
+    explanation: str
 
 
 @dataclass
@@ -203,7 +243,8 @@ def collect_source(source: Source, *, limit: int | None = None, dry_run: bool = 
         logger.exception("Collection failed for source=%s elapsed=%.2fs error=%s", source.slug, elapsed, error)
         source.last_error = error
         source.last_new_items_count = 0
-        source.save(update_fields=["last_error", "last_new_items_count", "updated_at"])
+        source.last_fetch_duration_seconds = elapsed
+        source.save(update_fields=["last_error", "last_new_items_count", "last_fetch_duration_seconds", "updated_at"])
         return CollectResult(source=source, errors=[error], elapsed_seconds=elapsed)
 
     result.elapsed_seconds = time.monotonic() - started
@@ -213,7 +254,21 @@ def collect_source(source: Source, *, limit: int | None = None, dry_run: bool = 
     else:
         source.last_error = ""
     source.last_new_items_count = result.created_count
-    source.save(update_fields=["last_success_at", "last_error", "last_new_items_count", "updated_at"])
+    source.last_fetch_duration_seconds = result.elapsed_seconds
+    if source.average_fetch_duration_seconds is None:
+        source.average_fetch_duration_seconds = result.elapsed_seconds
+    else:
+        source.average_fetch_duration_seconds = round((source.average_fetch_duration_seconds * 0.8) + (result.elapsed_seconds * 0.2), 3)
+    source.save(
+        update_fields=[
+            "last_success_at",
+            "last_error",
+            "last_new_items_count",
+            "last_fetch_duration_seconds",
+            "average_fetch_duration_seconds",
+            "updated_at",
+        ]
+    )
     logger.info(
         "Finished fetch for source=%s url=%s found=%s created=%s duplicates=%s skipped=%s errors=%s elapsed=%.2fs",
         source.slug,
@@ -304,27 +359,68 @@ def collect_html(source: Source, *, limit: int | None = None, dry_run: bool = Fa
     return result
 
 
-def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[NewsItem, bool]:
+def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[NewsItem | None, bool]:
+    display_title = clean_title(raw_item.title, raw_item.source.slug) or raw_item.title
+    franchise_matches = detect_franchise_matches(display_title, raw_item.raw_text)
+    franchises = [match.franchise for match in franchise_matches]
+    confidence = extraction_confidence_for(
+        title=raw_item.title,
+        url=raw_item.canonical_url or raw_item.url,
+        raw_text=raw_item.raw_text,
+        published_at=raw_item.published_at,
+        source=raw_item.source,
+        franchise_count=len(franchises),
+    )
+    rejection_reason = article_rejection_reason(
+        title=raw_item.title,
+        url=raw_item.canonical_url or raw_item.url,
+        raw_text=raw_item.raw_text,
+        published_at=raw_item.published_at,
+        source=raw_item.source,
+    )
+    if not rejection_reason and confidence < LOW_CONFIDENCE_THRESHOLD:
+        rejection_reason = "low_extraction_confidence"
+    updates: list[str] = []
+    if raw_item.rejection_reason != rejection_reason:
+        raw_item.rejection_reason = rejection_reason
+        updates.append("rejection_reason")
+    if raw_item.extraction_confidence != confidence:
+        raw_item.extraction_confidence = confidence
+        updates.append("extraction_confidence")
+    if raw_item.published_at and raw_item.published_at_precision == PublishedAtPrecision.UNKNOWN:
+        raw_item.published_at_precision = PublishedAtPrecision.EXACT
+        updates.append("published_at_precision")
+    if updates:
+        raw_item.save(update_fields=updates)
+
+    if rejection_reason:
+        if hasattr(raw_item, "news_item"):
+            raw_item.news_item.is_archived = True
+            raw_item.news_item.extraction_confidence = confidence
+            raw_item.news_item.save(update_fields=["is_archived", "extraction_confidence", "updated_at"])
+            return raw_item.news_item, False
+        logger.info("Rejected raw item id=%s source=%s reason=%s title=%s", raw_item.pk, raw_item.source.slug, rejection_reason, raw_item.title)
+        return None, False
+
     existing = find_existing_news_item(
         raw_item=raw_item,
         canonical_url=raw_item.canonical_url or "",
-        title=raw_item.title,
+        title=display_title,
     )
     if existing and not recalculate:
         return existing, False
 
-    classification = classify_item(raw_item.source, raw_item.title, raw_item.raw_text)
-    franchises = detect_franchises(raw_item.title, raw_item.raw_text)
-    importance = calculate_importance(
+    classification = classify_item(raw_item.source, display_title, raw_item.raw_text)
+    importance, importance_reasons = calculate_importance_with_reasons(
         source=raw_item.source,
-        title=raw_item.title,
+        title=display_title,
         raw_text=raw_item.raw_text,
         tags=classification.tags,
         franchises=franchises,
     )
     summary_ko = summarize_item(
         source=raw_item.source,
-        title=raw_item.title,
+        title=display_title,
         raw_text=raw_item.raw_text,
         classification=classification,
     )
@@ -332,10 +428,11 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
 
     fields = {
         "source": raw_item.source,
-        "title": raw_item.title,
-        "normalized_title": normalize_title(raw_item.title),
+        "title": display_title,
+        "normalized_title": normalize_title(display_title),
         "url": raw_item.url,
         "canonical_url": raw_item.canonical_url,
+        "canonical_url_hash": raw_item.canonical_url_hash or create_url_hash(raw_item.canonical_url or ""),
         "summary_ko": summary_ko,
         "summary_original": truncate(raw_item.raw_text, 1500),
         "trust_label": classification.trust_label,
@@ -343,10 +440,14 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
         "detected_tags": classification.tags,
         "confidence_score": classification.confidence_score,
         "importance_score": importance,
+        "importance_reasons": importance_reasons,
         "region": raw_item.source.region,
         "language": raw_item.source.language,
         "published_at": raw_item.published_at,
+        "published_at_precision": raw_item.published_at_precision,
         "first_seen_at": raw_item.first_seen_at,
+        "is_backfill": is_backfill_item(raw_item.published_at, raw_item.first_seen_at),
+        "extraction_confidence": confidence,
         "thumbnail_url": thumbnail_url or "",
     }
 
@@ -367,12 +468,12 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
                     news_item = NewsItem.objects.get(raw_item=raw_item)
                 created = False
 
-        _sync_franchises(news_item, franchises)
+        _sync_franchises(news_item, franchise_matches)
         _link_issue(news_item)
     return news_item, created
 
 
-def recalculate_news_item(news_item: NewsItem) -> NewsItem:
+def recalculate_news_item(news_item: NewsItem) -> NewsItem | None:
     updated, _created = process_raw_item(news_item.raw_item, recalculate=True)
     return updated
 
@@ -382,6 +483,8 @@ def _payload_from_feed_entry(source: Source, entry) -> dict[str, Any]:
     link = _entry_link(entry)
     raw_html = _entry_content(entry)
     raw_text = strip_html(raw_html)
+    raw_published_at_text = entry.get("published", "") or entry.get("updated", "") or entry.get("created", "")
+    published_at = _entry_datetime(entry)
     metadata = {
         "feed_id": entry.get("id") or entry.get("guid", ""),
         "tags": [tag.get("term") for tag in entry.get("tags", []) if tag.get("term")],
@@ -392,7 +495,9 @@ def _payload_from_feed_entry(source: Source, entry) -> dict[str, Any]:
         "title": title,
         "url": link,
         "author": entry.get("author", ""),
-        "published_at": _entry_datetime(entry),
+        "published_at": published_at,
+        "raw_published_at_text": raw_published_at_text,
+        "published_at_precision": precision_for_datetime(published_at, raw_published_at_text),
         "raw_html": raw_html,
         "raw_text": raw_text,
         "metadata": metadata,
@@ -434,13 +539,16 @@ def _html_payloads_from_selectors(source: Source, soup: BeautifulSoup, page_html
         thumbnail_el = item.select_one(config["thumbnail_selector"]) if config.get("thumbnail_selector") else None
         thumbnail_url = normalize_url(_select_attr(thumbnail_el, thumbnail_attr), base_url=base_url) if thumbnail_el else ""
         date_value = _select_attr(date_el, date_attr) or _select_text(date_el)
+        published_at = _parse_datetime(date_value)
         payloads.append(
             {
                 "source": source,
                 "title": title,
                 "url": url,
                 "author": author,
-                "published_at": _parse_datetime(date_value),
+                "published_at": published_at,
+                "raw_published_at_text": date_value,
+                "published_at_precision": precision_for_datetime(published_at, date_value),
                 "raw_html": str(item),
                 "raw_text": raw_text,
                 "metadata": {
@@ -471,6 +579,7 @@ def _html_payloads_generic(source: Source, soup: BeautifulSoup, page_html: str) 
         parent = link.find_parent(["article", "li", "div", "section"]) or link
         date_el = parent.find("time")
         date_value = _select_attr(date_el, "datetime") or _select_text(date_el) or _select_text(parent)
+        published_at = _parse_datetime(date_value)
         thumbnail_el = parent.find("img")
         thumbnail_url = normalize_url(_select_attr(thumbnail_el, "src"), base_url=base_url) if thumbnail_el else ""
         payloads.append(
@@ -479,7 +588,9 @@ def _html_payloads_generic(source: Source, soup: BeautifulSoup, page_html: str) 
                 "title": truncate(title, 500),
                 "url": url,
                 "author": "",
-                "published_at": _parse_datetime(date_value),
+                "published_at": published_at,
+                "raw_published_at_text": date_value,
+                "published_at_precision": precision_for_datetime(published_at, date_value),
                 "raw_html": str(parent),
                 "raw_text": normalize_whitespace(parent.get_text(" ")),
                 "metadata": {
@@ -534,13 +645,16 @@ def _html_payloads_from_embedded_json(source: Source, soup: BeautifulSoup, page_
         summary = normalize_whitespace(_json_first_value(item, summary_fields))
         author = normalize_whitespace(_json_first_value(item, author_fields))
         date_value = normalize_whitespace(_json_first_value(item, date_fields))
+        published_at = _parse_datetime(date_value)
         payloads.append(
             {
                 "source": source,
                 "title": title,
                 "url": url,
                 "author": author,
-                "published_at": _parse_datetime(date_value),
+                "published_at": published_at,
+                "raw_published_at_text": date_value,
+                "published_at_precision": precision_for_datetime(published_at, date_value),
                 "raw_html": json.dumps(item, ensure_ascii=False)[:5000],
                 "raw_text": summary,
                 "metadata": {
@@ -644,10 +758,35 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
         return
     result.found_count += 1
     canonical_url = normalize_url(url)
+    canonical_url_hash = create_url_hash(canonical_url)
     content_hash = content_hash_for(title, canonical_url)
+    published_at = payload.get("published_at")
+    rejection_reason = article_rejection_reason(
+        title=title,
+        url=canonical_url,
+        raw_text=payload.get("raw_text", "") or "",
+        published_at=published_at,
+        source=source,
+    )
+    extraction_confidence = extraction_confidence_for(
+        title=title,
+        url=canonical_url,
+        raw_text=payload.get("raw_text", "") or "",
+        published_at=published_at,
+        source=source,
+    )
+    if rejection_reason:
+        result.skipped_count += 1
 
     if dry_run:
-        result.dry_run_items.append({"title": title, "url": url, "canonical_url": canonical_url})
+        result.dry_run_items.append(
+            {
+                "title": title,
+                "url": url,
+                "canonical_url": canonical_url,
+                "rejection_reason": rejection_reason,
+            }
+        )
         return
 
     existing = find_existing_raw_item(
@@ -658,6 +797,18 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
     )
     if existing:
         result.duplicate_count += 1
+        update_fields: list[str] = []
+        if not existing.canonical_url_hash and canonical_url_hash:
+            existing.canonical_url_hash = canonical_url_hash
+            update_fields.append("canonical_url_hash")
+        if not existing.rejection_reason and rejection_reason:
+            existing.rejection_reason = rejection_reason
+            update_fields.append("rejection_reason")
+        if existing.extraction_confidence != extraction_confidence:
+            existing.extraction_confidence = extraction_confidence
+            update_fields.append("extraction_confidence")
+        if update_fields:
+            existing.save(update_fields=update_fields)
         if not hasattr(existing, "news_item"):
             result.raw_items.append(existing)
         return
@@ -669,10 +820,15 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
             url=url,
             canonical_url=canonical_url,
             author=payload.get("author", "") or "",
-            published_at=payload.get("published_at"),
+            published_at=published_at,
+            raw_published_at_text=payload.get("raw_published_at_text", "") or "",
+            published_at_precision=payload.get("published_at_precision") or PublishedAtPrecision.UNKNOWN,
             raw_html=payload.get("raw_html", "") or "",
             raw_text=payload.get("raw_text", "") or "",
             content_hash=content_hash,
+            canonical_url_hash=canonical_url_hash,
+            extraction_confidence=extraction_confidence,
+            rejection_reason=rejection_reason,
             metadata=payload.get("metadata", {}) or {},
         )
     except IntegrityError:
@@ -686,18 +842,26 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
     result.raw_items.append(raw_item)
 
 
-def _sync_franchises(news_item: NewsItem, franchises: list) -> None:
+def _sync_franchises(news_item: NewsItem, franchise_matches: list) -> None:
+    franchises = [match.franchise for match in franchise_matches]
     news_item.franchise_links.exclude(franchise__in=franchises).delete()
-    for franchise in franchises:
-        NewsItemFranchise.objects.get_or_create(news_item=news_item, franchise=franchise)
+    for match in franchise_matches:
+        link, created = NewsItemFranchise.objects.get_or_create(
+            news_item=news_item,
+            franchise=match.franchise,
+            defaults={"matched_alias": match.matched_alias, "confidence_score": match.confidence_score},
+        )
+        if not created and (link.matched_alias != match.matched_alias or link.confidence_score != match.confidence_score):
+            link.matched_alias = match.matched_alias
+            link.confidence_score = match.confidence_score
+            link.save(update_fields=["matched_alias", "confidence_score"])
 
 
 def _link_issue(news_item: NewsItem) -> Issue:
-    issue = _find_related_issue(news_item)
-    relation = IssueRelation.RELATED
+    match = _find_related_issue(news_item)
     now = timezone.now()
 
-    if issue is None:
+    if match is None:
         status = IssueStatus.CONFIRMED if news_item.trust_label == TrustLabel.OFFICIAL else IssueStatus.DEVELOPING
         if news_item.trust_label == TrustLabel.RUMOR or news_item.category in {NewsCategory.RUMOR, NewsCategory.LEAK}:
             status = IssueStatus.RUMOR
@@ -711,40 +875,58 @@ def _link_issue(news_item: NewsItem) -> Issue:
             official_confirmed_at=now if status == IssueStatus.CONFIRMED else None,
         )
         relation = IssueRelation.SAME_STORY
+        relation_confidence = 1.0
+        explanation = "새 이슈 생성"
     else:
-        same_category = issue.news_links.filter(news_item__category=news_item.category).exists()
-        relation = IssueRelation.SAME_STORY if same_category else IssueRelation.RELATED
-        if news_item.trust_label == TrustLabel.OFFICIAL and issue.status in {IssueStatus.RUMOR, IssueStatus.DEVELOPING}:
+        issue = match.issue
+        relation = match.relation
+        relation_confidence = match.confidence
+        explanation = match.explanation
+        if relation == IssueRelation.CONFIRMATION:
             issue.status = IssueStatus.CONFIRMED
             issue.official_confirmed_at = news_item.published_at or now
-            relation = IssueRelation.CONFIRMATION
         issue.confidence_score = max(issue.confidence_score, news_item.confidence_score)
         issue.last_updated_at = now
         issue.save(update_fields=["status", "confidence_score", "last_updated_at", "official_confirmed_at", "updated_at"])
 
-    NewsItemIssue.objects.get_or_create(news_item=news_item, issue=issue, defaults={"relation": relation})
+    link, created = NewsItemIssue.objects.get_or_create(
+        news_item=news_item,
+        issue=issue,
+        defaults={
+            "relation": relation,
+            "relation_confidence": relation_confidence,
+            "explanation": explanation,
+        },
+    )
+    if not created and (
+        link.relation != relation
+        or link.relation_confidence != relation_confidence
+        or link.explanation != explanation
+    ):
+        link.relation = relation
+        link.relation_confidence = relation_confidence
+        link.explanation = explanation
+        link.save(update_fields=["relation", "relation_confidence", "explanation"])
     return issue
 
 
-def _find_related_issue(news_item: NewsItem) -> Issue | None:
-    tokens = tokenize_topic(news_item.title)
+def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
+    tokens = _specific_issue_tokens(news_item.title)
     if not tokens:
         return None
     cutoff = timezone.now() - timedelta(days=14)
-    best_issue = None
+    best_match: IssueMatch | None = None
     best_score = 0.0
     news_franchise_ids = {link.franchise_id for link in news_item.franchise_links.all()}
     candidates = Issue.objects.filter(last_updated_at__gte=cutoff).prefetch_related(
         "news_links__news_item__franchise_links",
     )[:200]
     for issue in candidates:
-        issue_tokens = tokenize_topic(f"{issue.canonical_topic} {issue.title}")
+        issue_tokens = _specific_issue_tokens(f"{issue.canonical_topic} {issue.title}")
         if not issue_tokens:
             continue
         overlap = len(tokens & issue_tokens)
         issue_items = [link.news_item for link in issue.news_links.all()]
-        same_category = any(item.category == news_item.category for item in issue_items)
-        related_category = any(_categories_related(news_item.category, item.category) for item in issue_items)
         issue_franchise_ids = {
             franchise_link.franchise_id
             for item in issue_items
@@ -755,25 +937,33 @@ def _find_related_issue(news_item: NewsItem) -> Issue | None:
             news_item.trust_label == TrustLabel.OFFICIAL
             and issue.status in {IssueStatus.RUMOR, IssueStatus.DEVELOPING}
         )
-        min_overlap = 1 if shared_franchise and (related_category or confirmation_candidate) else 2
-        if overlap < min_overlap:
+        similarity = difflib.SequenceMatcher(None, normalize_title(news_item.title), normalize_title(issue.title)).ratio()
+        same_story = overlap >= 2 and (shared_franchise or similarity >= 0.55)
+        confirmation = confirmation_candidate and shared_franchise and (overlap >= 1 or similarity >= 0.48)
+        if not same_story and not confirmation:
             continue
 
         score = overlap / max(min(len(tokens), len(issue_tokens)), 1)
-        if same_category:
-            score += 0.15
-        elif related_category:
-            score += 0.08
         if shared_franchise:
-            score += 0.2
+            score += 0.25
+        score += min(similarity * 0.2, 0.2)
         if confirmation_candidate:
-            score += 0.1
+            score += 0.15
 
-        threshold = 0.3 if shared_franchise and (related_category or confirmation_candidate) else 0.35
+        threshold = 0.52 if confirmation else 0.6
         if score > best_score and score >= threshold:
-            best_issue = issue
+            relation = IssueRelation.CONFIRMATION if confirmation else IssueRelation.SAME_STORY
+            explanation = (
+                f"{relation}: shared_franchise={shared_franchise}, overlap={overlap}, "
+                f"similarity={similarity:.2f}, score={score:.2f}"
+            )
+            best_match = IssueMatch(issue=issue, relation=relation, confidence=round(min(score, 1.0), 3), explanation=explanation)
             best_score = score
-    return best_issue
+    return best_match
+
+
+def _specific_issue_tokens(value: str) -> set[str]:
+    return {token for token in tokenize_topic(value) if token not in BROAD_ISSUE_TOKENS}
 
 
 def _categories_related(left: str, right: str) -> bool:

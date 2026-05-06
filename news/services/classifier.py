@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from news.models import Franchise, NewsCategory, Source, TrustLabel, TrustType
 
+from .quality import FranchiseMatch
 from .text import normalize_title
 
 
@@ -106,19 +107,37 @@ def _keyword_matches(keyword: str, lower_text: str, normalized_text: str) -> boo
 
 
 def detect_franchises(title: str, raw_text: str = "") -> list[Franchise]:
-    haystack = normalize_title(f"{title} {raw_text}")
-    matches: list[Franchise] = []
+    return [match.franchise for match in detect_franchise_matches(title, raw_text)]
+
+
+def detect_franchise_matches(title: str, raw_text: str = "") -> list[FranchiseMatch]:
+    raw_haystack = f"{title} {raw_text}"
+    haystack = normalize_title(raw_haystack)
+    matches: list[FranchiseMatch] = []
     for franchise in Franchise.objects.order_by("-priority", "name"):
-        aliases = [franchise.name, *(franchise.aliases or [])]
-        if any(_alias_matches(haystack, alias) for alias in aliases):
-            matches.append(franchise)
+        aliases = sorted([franchise.name, *(franchise.aliases or [])], key=lambda value: len(normalize_title(value)), reverse=True)
+        for alias in aliases:
+            confidence = _alias_match_confidence(haystack, raw_haystack, alias)
+            if confidence:
+                matches.append(FranchiseMatch(franchise=franchise, matched_alias=alias, confidence_score=confidence))
+                break
     return matches
 
 
 def _alias_matches(haystack: str, alias: str) -> bool:
+    return bool(_alias_match_confidence(haystack, haystack, alias))
+
+
+def _alias_match_confidence(haystack: str, raw_haystack: str, alias: str) -> int:
     needle = normalize_title(alias)
     if not needle:
-        return False
+        return 0
+    if re.fullmatch(r"[a-z0-9]{1,2}", needle):
+        if not re.search(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", raw_haystack):
+            return 0
+        if not any(context in haystack for context in ["nintendo", "switch", "donkey", "kong"]):
+            return 0
+        return 55
     if re.fullmatch(r"[a-z0-9 ]+", needle):
-        return bool(re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack))
-    return needle in haystack
+        return 100 if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack) else 0
+    return 100 if needle in haystack else 0

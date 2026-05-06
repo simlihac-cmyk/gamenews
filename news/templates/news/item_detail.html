@@ -2,18 +2,23 @@
 {% load news_extras %}
 {% block title %}{{ item.title }} - Nintendo Watch{% endblock %}
 {% block content %}
+<script type="application/ld+json">{{ article_json_ld|safe }}</script>
 <div class="page-head">
   <div>
     <div class="badge-row">
-      <span class="badge {{ item.trust_label }}">{{ item.trust_label_ko }}</span>
-      <span class="badge {{ item.category|category_class }}">{{ item.category_ko }}</span>
+      <span class="badge {{ item.trust_label }}">{% if item.trust_label == "official" %}공식 출처{% else %}{{ item.trust_label_ko }}{% endif %}</span>
+      {% if item.category != "official" and item.category != "general" %}
+        <span class="badge {{ item.category|category_class }}">{{ item.category_ko }}</span>
+      {% endif %}
       <span class="badge">중요도 {{ item.importance_score }}</span>
+      {% if item.is_backfill %}<span class="badge state">과거 기사 수집</span>{% endif %}
+      {% if not item.published_at %}<span class="badge state">게시일 미상</span>{% endif %}
     </div>
     <h1 style="margin-top: 10px;">{{ item.title }}</h1>
-    <div class="muted">{{ item.source.name }} · 감지 {{ item.first_seen_at|date:"Y-m-d H:i" }}</div>
+    <div class="muted">{{ item.source.name }} · {% if item.published_at %}게시 {{ item.published_at|date:"Y-m-d H:i" }}{% else %}게시일 미상{% endif %} · 수집 {{ item.first_seen_at|date:"Y-m-d H:i" }}</div>
   </div>
   <div class="button-row">
-    <a class="btn" href="{{ item.url }}" target="_blank" rel="noopener">원문</a>
+    <a class="btn" href="{{ item.url }}" target="_blank" rel="noopener" aria-label="원문 보기: {{ item.source.name }}의 {{ item.title }}">원문</a>
     {% if request.user.is_authenticated %}
       <form method="post" action="{% url 'news:mark_read' item.pk %}">{% csrf_token %}<button type="submit">읽음</button></form>
       <form method="post" action="{% url 'news:toggle_bookmark' item.pk %}">{% csrf_token %}<button type="submit">{% if item.is_bookmarked %}북마크 해제{% else %}북마크{% endif %}</button></form>
@@ -25,7 +30,11 @@
 <div class="grid-2">
   <section class="card">
     <h2>요약</h2>
-    <p class="summary">{{ item.summary_ko }}</p>
+    {% if show_summary %}
+      <p class="summary">{{ item.summary_ko }}</p>
+    {% else %}
+      <p class="muted">구체 요약은 아직 없습니다.</p>
+    {% endif %}
     <div class="badge-row">
       {% for tag in item.detected_tags %}
         <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>
@@ -39,6 +48,7 @@
     <h2>메타데이터</h2>
     <div class="meta">
       <span>게시: {{ item.published_at|date:"Y-m-d H:i"|default:"미상" }}</span>
+      <span>수집: {{ item.first_seen_at|date:"Y-m-d H:i" }}</span>
       <span>지역: {{ item.region }}</span>
       <span>언어: {{ item.language }}</span>
       <span>신뢰도 점수: {{ item.confidence_score }}</span>
@@ -50,7 +60,7 @@
 <section class="card" style="margin-top: 14px;">
   <h2>연결된 이슈</h2>
   {% if issue_link %}
-    <p><a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title }}</a> · {{ issue_link.issue.status_ko }} · {{ issue_link.get_relation_display }}</p>
+    <p><a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title }}</a> · {{ issue_link.issue.status_ko }} · {{ issue_link.get_relation_display }}{% if issue_link.explanation %} · {{ issue_link.explanation }}{% endif %}</p>
   {% else %}
     <p class="muted">연결된 이슈가 없습니다.</p>
   {% endif %}
@@ -62,7 +72,7 @@
     {% for related in related_items %}
       <div>
         <a href="{% url 'news:item_detail' related.pk %}">{{ related.title }}</a>
-        <span class="muted"> · {{ related.source.name }} · {{ related.first_seen_at|date:"Y-m-d H:i" }}</span>
+        <span class="muted"> · {{ related.source.name }} · {% if related.published_at %}게시 {{ related.published_at|date:"Y-m-d H:i" }}{% else %}게시일 미상{% endif %}</span>
       </div>
     {% empty %}
       <div class="muted">관련 항목이 없습니다.</div>

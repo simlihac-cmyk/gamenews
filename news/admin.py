@@ -13,6 +13,7 @@ from .models import (
     Notification,
     RawItem,
     Source,
+    UserFranchiseFavorite,
 )
 
 
@@ -37,11 +38,21 @@ class SourceAdmin(admin.ModelAdmin):
         "last_checked_at",
         "last_success_at",
         "last_new_items_count",
+        "last_fetch_duration_seconds",
+        "average_fetch_duration_seconds",
         "item_count",
     )
     list_filter = ("source_type", "trust_type", "region", "language", "enabled")
     search_fields = ("name", "slug", "url", "last_error")
-    readonly_fields = ("created_at", "updated_at", "last_checked_at", "last_success_at", "last_new_items_count")
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "last_checked_at",
+        "last_success_at",
+        "last_new_items_count",
+        "last_fetch_duration_seconds",
+        "average_fetch_duration_seconds",
+    )
     prepopulated_fields = {"slug": ("name",)}
 
     def get_queryset(self, request):
@@ -54,21 +65,32 @@ class SourceAdmin(admin.ModelAdmin):
 
 @admin.register(RawItem)
 class RawItemAdmin(admin.ModelAdmin):
-    list_display = ("title", "source", "published_at", "first_seen_at", "canonical_url")
-    list_filter = ("source", "published_at", "first_seen_at")
-    search_fields = ("title", "url", "canonical_url", "source__name", "raw_text")
-    readonly_fields = ("first_seen_at", "collected_at", "content_hash")
+    list_display = (
+        "title",
+        "source",
+        "published_at",
+        "published_at_precision",
+        "rejection_reason",
+        "extraction_confidence",
+        "first_seen_at",
+        "canonical_url",
+    )
+    list_filter = ("source", "published_at", "published_at_precision", "rejection_reason", "first_seen_at")
+    search_fields = ("title", "url", "canonical_url", "source__name", "raw_text", "rejection_reason")
+    readonly_fields = ("first_seen_at", "collected_at", "content_hash", "canonical_url_hash")
     date_hierarchy = "published_at"
 
 
 class NewsItemFranchiseInline(admin.TabularInline):
     model = NewsItemFranchise
     extra = 0
+    readonly_fields = ("matched_alias", "confidence_score")
 
 
 class NewsItemIssueInline(admin.TabularInline):
     model = NewsItemIssue
     extra = 0
+    readonly_fields = ("relation_confidence", "explanation")
 
 
 @admin.register(NewsItem)
@@ -79,6 +101,8 @@ class NewsItemAdmin(admin.ModelAdmin):
         "trust_label",
         "category",
         "importance_score",
+        "extraction_confidence",
+        "is_backfill",
         "is_read",
         "is_bookmarked",
         "published_at",
@@ -92,10 +116,11 @@ class NewsItemAdmin(admin.ModelAdmin):
         "is_read",
         "is_bookmarked",
         "is_archived",
+        "is_backfill",
         "importance_score",
     )
     search_fields = ("title", "url", "canonical_url", "source__name", "summary_ko")
-    readonly_fields = ("created_at", "updated_at", "normalized_title")
+    readonly_fields = ("created_at", "updated_at", "normalized_title", "canonical_url_hash", "importance_reasons")
     date_hierarchy = "published_at"
     inlines = [NewsItemFranchiseInline, NewsItemIssueInline]
 
@@ -124,7 +149,11 @@ class IssueAdmin(admin.ModelAdmin):
                     NewsItemIssue.objects.get_or_create(
                         news_item=link.news_item,
                         issue=primary,
-                        defaults={"relation": link.relation},
+                        defaults={
+                            "relation": link.relation,
+                            "relation_confidence": link.relation_confidence,
+                            "explanation": link.explanation,
+                        },
                     )
 
                 primary.status = _higher_issue_status(primary.status, issue.status)
@@ -185,6 +214,14 @@ class FranchiseAdmin(admin.ModelAdmin):
     list_display = ("name", "slug", "priority")
     search_fields = ("name", "slug", "aliases")
     prepopulated_fields = {"slug": ("name",)}
+
+
+@admin.register(UserFranchiseFavorite)
+class UserFranchiseFavoriteAdmin(admin.ModelAdmin):
+    list_display = ("user", "franchise", "created_at")
+    list_filter = ("franchise",)
+    search_fields = ("user__username", "franchise__name", "franchise__slug")
+    readonly_fields = ("created_at",)
 
 
 @admin.register(Notification)

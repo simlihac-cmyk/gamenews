@@ -1,4 +1,5 @@
 {% extends "news/base.html" %}
+{% load news_extras %}
 {% block title %}{{ franchise.name }} - Nintendo Watch{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -13,15 +14,16 @@
   {% for item in page.object_list %}
     <article class="card">
       <div class="badge-row">
-        <span class="badge {{ item.trust_label }}">{{ item.trust_label_ko }}</span>
-        <span class="badge">{{ item.category_ko }}</span>
+        <span class="badge {{ item.trust_label }}">{% if item.trust_label == "official" %}공식 출처{% else %}{{ item.trust_label_ko }}{% endif %}</span>
+        {% if item.category != "official" and item.category != "general" %}<span class="badge">{{ item.category_ko }}</span>{% endif %}
         <span class="badge">중요도 {{ item.importance_score }}</span>
       </div>
       <h2 class="item-title"><a href="{% url 'news:item_detail' item.pk %}">{{ item.title }}</a></h2>
-      <p class="summary">{{ item.summary_ko }}</p>
+      {% if item.summary_ko|show_summary %}<p class="summary">{{ item.summary_ko }}</p>{% endif %}
       <div class="meta">
         <span>{{ item.source.name }}</span>
-        <span>{{ item.first_seen_at|date:"Y-m-d H:i" }}</span>
+        <span>{% if item.published_at %}게시 {{ item.published_at|date:"Y-m-d H:i" }}{% else %}게시일 미상{% endif %}</span>
+        <span>수집 {{ item.first_seen_at|date:"Y-m-d H:i" }}</span>
       </div>
     </article>
   {% empty %}
