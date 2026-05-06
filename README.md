@@ -16,13 +16,13 @@ docker compose exec web python manage.py fetch_news --limit 20
 Open the app at:
 
 ```text
-http://localhost:8000/
+https://gamenews.monosaccharide180.com/
 ```
 
 Admin:
 
 ```text
-http://localhost:8000/admin/
+https://gamenews.monosaccharide180.com/admin/
 ```
 
 The private web UI requires login. Create an account before browsing:

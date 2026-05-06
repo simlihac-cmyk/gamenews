@@ -39,6 +39,35 @@ docker compose -f docker-compose.prod.yml exec web python manage.py seed_sources
 
 The production compose file uses gunicorn and `restart: unless-stopped`.
 
+## Production Domain
+
+Nintendo Watch is configured for:
+
+```text
+https://gamenews.monosaccharide180.com/
+```
+
+Production `.env` should include:
+
+```env
+ALLOWED_HOSTS=gamenews.monosaccharide180.com
+CSRF_TRUSTED_ORIGINS=https://gamenews.monosaccharide180.com
+SECURE_SSL_REDIRECT=true
+SESSION_COOKIE_SECURE=true
+CSRF_COOKIE_SECURE=true
+USE_X_FORWARDED_PROTO=true
+USE_X_FORWARDED_HOST=true
+```
+
+Run gunicorn behind a TLS-terminating reverse proxy such as Caddy, nginx, Traefik, or Cloudflare Tunnel. The proxy should pass:
+
+```text
+Host: gamenews.monosaccharide180.com
+X-Forwarded-Proto: https
+```
+
+Point the domain or tunnel to the Mac mini service on port `8000`.
+
 ## Scheduled Fetch
 
 Use launchd on macOS:
