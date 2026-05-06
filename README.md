@@ -117,7 +117,7 @@ For production-style Mac mini operation, see [docs/DEPLOYMENT.md](docs/DEPLOYMEN
 This checkout can stay as the development repo. Add a separate GitHub repo as a deployment remote:
 
 ```bash
-git remote add deploy https://github.com/simlihac-cmyk/gamenews.git
+git remote add deploy git@github.com:simlihac-cmyk/gamenews.git
 git push deploy main
 ```
 

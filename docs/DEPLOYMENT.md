@@ -3,13 +3,13 @@
 This workspace is the development repo. The deployment repo can be a separate GitHub repository, for example:
 
 ```text
-https://github.com/simlihac-cmyk/gamenews.git
+git@github.com:simlihac-cmyk/gamenews.git
 ```
 
 Recommended remote layout:
 
 ```bash
-git remote add deploy https://github.com/simlihac-cmyk/gamenews.git
+git remote add deploy git@github.com:simlihac-cmyk/gamenews.git
 git push deploy main
 ```
 
