@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib import messages
+from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.paginator import Paginator
+from django.db import connection
 from django.db.models import Case, Count, IntegerField, Prefetch, Q, Sum, Value, When
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -43,13 +47,26 @@ def item_list(request):
         data = form.cleaned_data
         if data.get("q"):
             query = data["q"]
-            items = items.filter(
+            search_filter = (
                 Q(title__icontains=query)
                 | Q(summary_ko__icontains=query)
                 | Q(summary_original__icontains=query)
                 | Q(source__name__icontains=query)
                 | Q(raw_item__raw_text__icontains=query)
             )
+            if connection.vendor == "postgresql":
+                vector = (
+                    SearchVector("title", weight="A", config="simple")
+                    + SearchVector("summary_ko", weight="B", config="simple")
+                    + SearchVector("summary_original", weight="C", config="simple")
+                    + SearchVector("source__name", weight="D", config="simple")
+                )
+                search_query = SearchQuery(query, config="simple", search_type="websearch")
+                items = items.annotate(search_vector=vector, rank=SearchRank(vector, search_query)).filter(
+                    Q(search_vector=search_query) | search_filter
+                ).order_by("-rank", "-published_at", "-first_seen_at", "-created_at")
+            else:
+                items = items.filter(search_filter)
         if data.get("trust_label"):
             items = items.filter(trust_label=data["trust_label"])
         if data.get("category"):
@@ -217,7 +234,27 @@ def source_health(request):
         "items": NewsItem.objects.count(),
         "last_new": Source.objects.aggregate(total=Sum("last_new_items_count"))["total"] or 0,
     }
-    return render(request, "news/source_health.html", {"sources": sources, "totals": totals})
+    return render(
+        request,
+        "news/source_health.html",
+        {"sources": sources, "totals": totals, "backup_status": _backup_status()},
+    )
+
+
+def _backup_status() -> dict[str, object]:
+    backup_dir = Path(settings.BACKUP_DIR)
+    files = sorted(backup_dir.glob("nintendowatch-*.sql.gz"), key=lambda path: path.stat().st_mtime, reverse=True)
+    if not files:
+        return {"directory": str(backup_dir), "exists": False}
+    latest = files[0]
+    modified = datetime.fromtimestamp(latest.stat().st_mtime, tz=timezone.get_current_timezone())
+    return {
+        "directory": str(backup_dir),
+        "exists": True,
+        "filename": latest.name,
+        "modified_at": modified,
+        "size_mb": round(latest.stat().st_size / 1024 / 1024, 2),
+    }
 
 
 def franchise_list(request):

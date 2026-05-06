@@ -95,3 +95,4 @@ DISCORD_WEBHOOK_URL = env("DISCORD_WEBHOOK_URL", default="")
 
 NINTENDO_WATCH_USER_AGENT = "NintendoWatchBot/0.1 personal private archive"
 COLLECTOR_TIMEOUT_SECONDS = env.float("COLLECTOR_TIMEOUT_SECONDS", default=10.0)
+BACKUP_DIR = env("BACKUP_DIR", default=str(BASE_DIR / "backups" / "postgres"))

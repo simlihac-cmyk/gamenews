@@ -127,6 +127,9 @@ docker compose -f "$COMPOSE_FILE" up -d --build
 log "running production migrations"
 docker compose -f "$COMPOSE_FILE" exec -T web python manage.py migrate --noinput
 
+log "seeding production sources"
+docker compose -f "$COMPOSE_FILE" exec -T web python manage.py seed_sources
+
 log "collecting static files"
 docker compose -f "$COMPOSE_FILE" exec -T web python manage.py collectstatic --noinput
 

@@ -203,6 +203,14 @@ launchctl kickstart -k gui/$(id -u)/com.nintendowatch.backup
 
 백업 파일은 `/Users/sg_mac/gamenews/backups/postgres/`에 `nintendowatch-YYYYMMDD-HHMMSS.sql.gz` 형식으로 저장되고, 기본 보관 기간은 30일입니다.
 
+이슈 stale 처리와 저중요 오래된 뉴스 archive를 매일 03:25에 실행하려면:
+
+```bash
+cp deploy/launchd/com.nintendowatch.maintenance.plist.example ~/Library/LaunchAgents/com.nintendowatch.maintenance.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nintendowatch.maintenance.plist
+launchctl kickstart -k gui/$(id -u)/com.nintendowatch.maintenance
+```
+
 ### 데이터베이스
 
 Docker Compose 기준 기본값입니다.
@@ -268,6 +276,14 @@ COLLECTOR_TIMEOUT_SECONDS=10
 
 각 소스 HTTP 요청의 기본 타임아웃입니다. 너무 크게 잡으면 깨진 소스 하나가 오래 기다리게 되므로 10초 정도를 권장합니다.
 
+### 백업 상태 경로
+
+상태 화면에서 최근 백업 파일을 확인할 때 쓰는 경로입니다.
+
+```env
+BACKUP_DIR=/Users/sg_mac/gamenews/backups/postgres
+```
+
 ## 수동 명령
 
 기본 소스와 프랜차이즈 생성:
@@ -306,6 +322,18 @@ docker compose exec web python manage.py fetch_news --limit 20 --dry-run
 docker compose exec web python manage.py recalculate_items
 ```
 
+저중요 오래된 뉴스를 보관 처리:
+
+```bash
+docker compose exec web python manage.py archive_low_value_items --days 60 --max-importance 25
+```
+
+읽지 않은 항목까지 포함하려면:
+
+```bash
+docker compose exec web python manage.py archive_low_value_items --days 60 --max-importance 25 --include-unread
+```
+
 오래된 루머/전개 중 이슈를 `오래됨`으로 표시:
 
 ```bash
@@ -316,6 +344,12 @@ docker compose exec web python manage.py mark_stale_issues --days 30
 
 ```bash
 docker compose exec web python manage.py mark_stale_issues --days 30 --dry-run
+```
+
+알림 설정 테스트:
+
+```bash
+docker compose exec web python manage.py test_notifications --channel discord
 ```
 
 테스트:
@@ -337,6 +371,12 @@ docker compose -f docker-compose.prod.yml up -d
 ```bash
 cp deploy/launchd/com.nintendowatch.fetch.plist.example ~/Library/LaunchAgents/com.nintendowatch.fetch.plist
 launchctl load ~/Library/LaunchAgents/com.nintendowatch.fetch.plist
+```
+
+운영 유지보수 작업을 한 번 직접 실행:
+
+```bash
+./scripts/macmini_maintenance.sh
 ```
 
 자세한 배포/운영 흐름은 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)를 참고하세요.
@@ -374,6 +414,10 @@ git commit -m "변경 내용"
 
 깨진 소스 하나가 전체 fetch job을 멈추지 않도록 처리되어 있습니다.
 
+`fetch_news --notify`로 실행하면 source fetch 오류도 Discord 운영 알림으로 전송합니다. 같은 source에서 같은 오류가 반복될 때는 중복 알림을 보내지 않습니다.
+
+상태 화면에는 최근 PostgreSQL 백업 파일도 함께 표시됩니다.
+
 ## HTML Source.config 예시
 
 HTML 소스는 Django admin의 `Source.config` JSON으로 selector를 설정할 수 있습니다.
@@ -405,6 +449,8 @@ generic fallback URL 필터:
   "title_min_length": 10
 }
 ```
+
+`title_include_keywords`, `title_exclude_keywords`, `url_include_patterns`, `url_exclude_patterns`는 RSS/HTML 저장 직전 공통으로 적용됩니다. Gematsu, Nintendo Life, VGC, Reddit 기본 소스는 닌텐도 관련 키워드 중심으로 노이즈를 줄이도록 seed되어 있습니다.
 
 Next.js/embedded JSON 방식:
 

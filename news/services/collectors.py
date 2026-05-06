@@ -639,6 +639,9 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
     if not title or not url:
         result.skipped_count += 1
         return
+    if not _passes_text_filters(source, title, url):
+        result.skipped_count += 1
+        return
     result.found_count += 1
     canonical_url = normalize_url(url)
     content_hash = content_hash_for(title, canonical_url)

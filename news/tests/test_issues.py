@@ -14,6 +14,7 @@ from news.models import (
     Issue,
     IssueRelation,
     IssueStatus,
+    NewsItem,
     NewsItemIssue,
     RawItem,
     Source,
@@ -136,6 +137,28 @@ class IssueGroupingTests(TestCase):
         self.assertEqual(issue.status, IssueStatus.STALE)
         self.assertIn("1 issue(s) marked stale", out.getvalue())
 
+    def test_archive_low_value_items_command_archives_old_read_items(self):
+        raw_item = self.make_raw_item(
+            self.rumor_source,
+            "Small old rumor",
+            "https://rumor.example/small-old-rumor",
+        )
+        news_item, _created = process_raw_item(raw_item)
+        old_time = timezone.now() - timedelta(days=90)
+        NewsItem.objects.filter(pk=news_item.pk).update(
+            first_seen_at=old_time,
+            published_at=old_time,
+            importance_score=5,
+            is_read=True,
+        )
+
+        out = StringIO()
+        call_command("archive_low_value_items", "--days", "60", "--max-importance", "10", stdout=out)
+
+        news_item.refresh_from_db()
+        self.assertTrue(news_item.is_archived)
+        self.assertIn("1 item(s) archived", out.getvalue())
+
     def test_issue_list_filters_by_status(self):
         Issue.objects.create(
             title="Confirmed issue",
@@ -172,3 +195,16 @@ class IssueGroupingTests(TestCase):
         self.assertContains(response, issue.title)
         self.assertContains(response, "관련 1건")
         self.assertContains(response, "루머 관찰 중")
+
+    def test_item_search_finds_matching_title(self):
+        raw_item = self.make_raw_item(
+            self.official_source,
+            "Nintendo Direct showcase announced",
+            "https://official.example/direct",
+        )
+        process_raw_item(raw_item)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("news:item_list"), {"q": "Direct showcase"})
+
+        self.assertContains(response, "Nintendo Direct showcase announced")

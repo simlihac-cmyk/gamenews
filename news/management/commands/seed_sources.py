@@ -5,6 +5,31 @@ from django.core.management.base import BaseCommand
 from news.models import Franchise, Language, Region, Source, SourceType, TrustType, TRUST_BASE_SCORE
 
 
+NINTENDO_TITLE_KEYWORDS = [
+    "Nintendo",
+    "Switch",
+    "Switch 2",
+    "Direct",
+    "Mario",
+    "Zelda",
+    "Pokemon",
+    "Pokémon",
+    "Metroid",
+    "Kirby",
+    "Donkey Kong",
+    "Splatoon",
+    "Xenoblade",
+    "Fire Emblem",
+    "Rhythm Heaven",
+    "Tomodachi",
+    "닌텐도",
+    "스위치",
+    "마리오",
+    "젤다",
+    "포켓몬",
+]
+
+
 SOURCES = [
     {
         "name": "한국닌텐도 News",
@@ -94,6 +119,10 @@ SOURCES = [
         "trust_type": TrustType.PRESS,
         "region": Region.GLOBAL,
         "language": Language.EN,
+        "config": {
+            "title_include_keywords": NINTENDO_TITLE_KEYWORDS,
+            "title_exclude_keywords": ["podcast", "interview roundup"],
+        },
     },
     {
         "name": "Nintendo Life",
@@ -103,6 +132,10 @@ SOURCES = [
         "trust_type": TrustType.PRESS,
         "region": Region.GLOBAL,
         "language": Language.EN,
+        "config": {
+            "title_include_keywords": NINTENDO_TITLE_KEYWORDS,
+            "title_exclude_keywords": ["soapbox", "talking point", "poll"],
+        },
     },
     {
         "name": "VGC Nintendo",
@@ -122,6 +155,8 @@ SOURCES = [
             "thumbnail_attr": "data-src",
             "url_include_patterns": ["/news/", "/features/"],
             "url_exclude_patterns": ["/feed", "/rss", "/category/", "/tag/", "/platforms/"],
+            "title_include_keywords": NINTENDO_TITLE_KEYWORDS,
+            "title_exclude_keywords": ["VGC Live", "Patreon", "tickets are on sale"],
             "title_exclude_exact": ["News RSS", "Features RSS", "Reviews RSS", "RSS Feed"],
         },
     },
@@ -133,6 +168,10 @@ SOURCES = [
         "trust_type": TrustType.RUMOR,
         "region": Region.GLOBAL,
         "language": Language.EN,
+        "config": {
+            "title_include_keywords": ["Nintendo", "Switch", "Switch 2", "Direct", "Mario", "Zelda", "Pokemon", "Pokémon"],
+            "title_exclude_keywords": ["weekly discussion", "megathread", "job listing", "hiring"],
+        },
     },
 ]
 

@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from news.models import Source
 from news.services.collectors import collect_source, fetch_enabled_sources, process_raw_item
-from news.services.notifier import notify_if_needed
+from news.services.notifier import clear_source_failure_alert, notify_if_needed, notify_source_failure
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,12 @@ class Command(BaseCommand):
                 f"duplicates={result.duplicate_count} skipped={result.skipped_count} "
                 f"errors={len(result.errors)} elapsed={result.elapsed_seconds:.2f}s"
             )
+            if notify:
+                if result.errors:
+                    alert = notify_source_failure(source, "; ".join(result.errors))
+                    self.stdout.write(f"  source alert {alert.channel}/{alert.status}")
+                else:
+                    clear_source_failure_alert(source)
 
             for raw_item in result.raw_items:
                 try:

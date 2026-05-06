@@ -33,6 +33,20 @@
     <span>전체 뉴스</span>
   </div>
 </div>
+<section class="card" style="margin-bottom: 14px;">
+  <div class="badge-row">
+    {% if backup_status.exists %}
+      <span class="badge confirmed">백업 정상</span>
+      <span class="badge">{{ backup_status.modified_at|date:"Y-m-d H:i" }}</span>
+      <span class="badge">{{ backup_status.size_mb }} MB</span>
+    {% else %}
+      <span class="badge debunked">백업 없음</span>
+    {% endif %}
+  </div>
+  <div class="muted" style="margin-top: 8px;">
+    {{ backup_status.directory }}{% if backup_status.filename %}/{{ backup_status.filename }}{% endif %}
+  </div>
+</section>
 <table class="table">
   <thead>
     <tr>

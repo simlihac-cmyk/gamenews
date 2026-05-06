@@ -7,7 +7,11 @@ from django.test import TestCase, override_settings
 
 from news.models import (
     NewsCategory,
+    Issue,
+    IssueRelation,
+    IssueStatus,
     NewsItem,
+    NewsItemIssue,
     Notification,
     NotificationChannel,
     NotificationStatus,
@@ -17,7 +21,7 @@ from news.models import (
     TrustLabel,
     TrustType,
 )
-from news.services.notifier import format_korean_message, notify_if_needed
+from news.services.notifier import format_korean_message, notify_if_needed, notify_source_failure
 from news.services.text import create_content_hash, normalize_title
 
 
@@ -171,3 +175,40 @@ class NotifierTests(TestCase):
         self.assertIn("중요도:", message)
         self.assertIn("요약:", message)
         self.assertIn("원문:", message)
+
+    def test_format_korean_message_includes_issue_context(self):
+        item = self.make_item()
+        issue = Issue.objects.create(
+            title="Nintendo Direct rumor",
+            canonical_topic="nintendo direct rumor",
+            status=IssueStatus.CONFIRMED,
+            confidence_score=90,
+        )
+        NewsItemIssue.objects.create(news_item=item, issue=issue, relation=IssueRelation.CONFIRMATION)
+
+        message = format_korean_message(item)
+
+        self.assertIn("이슈:", message)
+        self.assertIn("공식 확정", message)
+        self.assertIn("관련 1건", message)
+
+    @override_settings(
+        NOTIFICATIONS_ENABLED=True,
+        DISCORD_WEBHOOK_URL="https://discord.example.test/webhook",
+    )
+    def test_source_failure_alert_deduplicates_by_error(self):
+        source = Source.objects.create(
+            name="Broken Source",
+            slug="broken-source",
+            url="https://example.com/feed",
+            source_type=SourceType.RSS,
+            trust_type=TrustType.PRESS,
+        )
+
+        with patch("news.services.notifier.httpx.post", return_value=ok_response()) as post:
+            first = notify_source_failure(source, "HTTP 500")
+            second = notify_source_failure(source, "HTTP 500")
+
+        self.assertEqual(first.status, NotificationStatus.SENT)
+        self.assertEqual(second.status, NotificationStatus.SKIPPED)
+        self.assertEqual(post.call_count, 1)
