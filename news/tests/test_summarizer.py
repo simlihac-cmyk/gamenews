@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from django.core.management import call_command
@@ -11,6 +14,7 @@ from news.models import NewsItem, RawItem, Source, SourceType, TrustLabel, Trust
 from news.services.classifier import ClassificationResult
 from news.services.collectors import process_raw_item
 from news.services.summarizer import summarize_item
+from news.services.summary_batch import summary_token_for
 from news.services.text import create_content_hash
 
 
@@ -137,3 +141,66 @@ class SummarizeItemsCommandTests(TestCase):
         item.refresh_from_db()
         self.assertIn("무슨 일?:", item.summary_ko)
         self.assertIn("updated=1", out.getvalue())
+
+    def test_export_summary_batch_outputs_paste_ready_prompt(self):
+        item = self.make_item()
+        NewsItem.objects.filter(pk=item.pk).update(summary_ko="")
+
+        out = StringIO()
+        call_command("export_summary_batch", "--item", str(item.pk), "--target", "chatgpt", stdout=out)
+
+        prompt = out.getvalue()
+        self.assertIn("Nintendo Watch 한국어 요약 배치", prompt)
+        self.assertIn("ChatGPT", prompt)
+        self.assertIn(f'"id": {item.pk}', prompt)
+        self.assertIn(summary_token_for(item), prompt)
+        self.assertIn("응답은 설명 없이", prompt)
+
+    def test_import_summary_batch_updates_matching_item(self):
+        item = self.make_item()
+        NewsItem.objects.filter(pk=item.pk).update(summary_ko="")
+        summary = (
+            "무슨 일?: Nintendo Switch 2 업데이트 소식이 공개됐습니다.\n"
+            "왜 중요?: 새 기기 기능 변화와 이용 흐름을 파악하는 데 도움이 됩니다.\n"
+            "확인 상태: 공식 출처에서 확인된 내용입니다.\n"
+            "주의: 세부 조건과 지역 차이는 원문 링크에서 확인하세요."
+        )
+        payload = {"summaries": [{"id": item.pk, "token": summary_token_for(item), "summary_ko": summary}]}
+
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "summaries.json"
+            path.write_text("```json\n" + json.dumps(payload, ensure_ascii=False) + "\n```", encoding="utf-8")
+            out = StringIO()
+            call_command("import_summary_batch", "--input", str(path), stdout=out)
+
+        item.refresh_from_db()
+        self.assertEqual(item.summary_ko, summary)
+        self.assertIn("updated=1", out.getvalue())
+
+    def test_import_summary_batch_dry_run_does_not_update(self):
+        item = self.make_item()
+        NewsItem.objects.filter(pk=item.pk).update(summary_ko="")
+        payload = {
+            "summaries": [
+                {
+                    "id": item.pk,
+                    "token": summary_token_for(item),
+                    "summary_ko": (
+                        "무슨 일?: 테스트 요약입니다.\n"
+                        "왜 중요?: 테스트 흐름을 확인합니다.\n"
+                        "확인 상태: 공식 출처에서 확인된 내용입니다.\n"
+                        "주의: 원문 링크에서 세부 내용을 확인하세요."
+                    ),
+                }
+            ]
+        }
+
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "summaries.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            out = StringIO()
+            call_command("import_summary_batch", "--input", str(path), "--dry-run", stdout=out)
+
+        item.refresh_from_db()
+        self.assertEqual(item.summary_ko, "")
+        self.assertIn("would update=1", out.getvalue())
