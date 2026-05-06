@@ -299,19 +299,19 @@ SUMMARY_MAX_SOURCE_CHARS=3000
 ChatGPT Pro나 Gemini 웹앱 구독을 이미 쓰고 있고 API 비용을 추가하고 싶지 않다면, 반자동 배치 방식도 사용할 수 있습니다. 먼저 요약이 필요한 항목을 웹앱에 붙여넣을 프롬프트로 내보냅니다.
 
 ```bash
-docker compose exec web python manage.py export_summary_batch --limit 20 --target chatgpt --output /tmp/nintendowatch-summary-prompt.md
+docker compose exec -T web python manage.py export_summary_batch --limit 20 --target chatgpt > nintendowatch-summary-prompt.md
 ```
 
-`/tmp/nintendowatch-summary-prompt.md` 내용을 ChatGPT 또는 Gemini 웹앱에 붙여넣으면 모델이 JSON만 반환하도록 지시합니다. 그 응답을 파일로 저장한 뒤 먼저 dry-run으로 검증합니다.
+`nintendowatch-summary-prompt.md` 내용을 ChatGPT 또는 Gemini 웹앱에 붙여넣으면 모델이 JSON만 반환하도록 지시합니다. 그 응답을 `nintendowatch-summary-result.json` 같은 파일로 저장한 뒤 먼저 dry-run으로 검증합니다.
 
 ```bash
-docker compose exec web python manage.py import_summary_batch --input /tmp/nintendowatch-summary-result.json --dry-run
+docker compose exec -T web python manage.py import_summary_batch --input - --dry-run < nintendowatch-summary-result.json
 ```
 
 검증 결과가 괜찮으면 실제 반영합니다.
 
 ```bash
-docker compose exec web python manage.py import_summary_batch --input /tmp/nintendowatch-summary-result.json
+docker compose exec -T web python manage.py import_summary_batch --input - < nintendowatch-summary-result.json
 ```
 
 이미 있는 요약도 웹앱 결과로 덮어쓰고 싶으면 export와 import 양쪽에 `--force`를 붙입니다. import는 item id와 token을 확인하므로, 다른 DB나 오래된 export 파일의 응답이 섞이면 건너뜁니다.
@@ -377,9 +377,9 @@ docker compose exec web python manage.py summarize_items --force --provider auto
 ChatGPT/Gemini 웹앱용 반자동 요약 배치:
 
 ```bash
-docker compose exec web python manage.py export_summary_batch --limit 20 --target gemini --output /tmp/nintendowatch-summary-prompt.md
-docker compose exec web python manage.py import_summary_batch --input /tmp/nintendowatch-summary-result.json --dry-run
-docker compose exec web python manage.py import_summary_batch --input /tmp/nintendowatch-summary-result.json
+docker compose exec -T web python manage.py export_summary_batch --limit 20 --target gemini > nintendowatch-summary-prompt.md
+docker compose exec -T web python manage.py import_summary_batch --input - --dry-run < nintendowatch-summary-result.json
+docker compose exec -T web python manage.py import_summary_batch --input - < nintendowatch-summary-result.json
 ```
 
 저중요 오래된 뉴스를 보관 처리:
