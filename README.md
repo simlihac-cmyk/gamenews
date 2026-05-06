@@ -105,6 +105,18 @@ X-Forwarded-Proto: https
 
 로컬 개발 중에는 `.env.example`을 쓰면 되고, 그 경우 HTTPS 관련 값은 필요 없습니다.
 
+### Mac mini launchd
+
+KBO 배포처럼 Mac mini 로그인/재부팅 후 운영 컨테이너를 다시 올리려면:
+
+```bash
+cp deploy/launchd/com.sg_mac.gamenews.plist.example ~/Library/LaunchAgents/com.sg_mac.gamenews.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.sg_mac.gamenews.plist
+launchctl kickstart -k gui/$(id -u)/com.sg_mac.gamenews
+```
+
+이 launchd 작업은 `/Users/sg_mac/gamenews/deploy/start-prod.sh`를 실행해서 `docker compose -f docker-compose.prod.yml up -d`를 호출합니다.
+
 ### 데이터베이스
 
 Docker Compose 기준 기본값입니다.

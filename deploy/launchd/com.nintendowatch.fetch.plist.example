@@ -9,7 +9,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd /Users/sg_mac/gamenews_dev &amp;&amp; ./scripts/macmini_fetch.sh</string>
+    <string>cd /Users/sg_mac/gamenews &amp;&amp; ./scripts/macmini_fetch.sh</string>
   </array>
   <key>StartInterval</key>
   <integer>1800</integer>
@@ -19,4 +19,3 @@
   <string>/tmp/nintendowatch-fetch.err</string>
 </dict>
 </plist>
-
