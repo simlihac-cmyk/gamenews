@@ -54,8 +54,17 @@ DEFAULT_EXCLUDE_PATTERNS = [
     "/contact",
     "/login",
     "/account",
+    "/feed",
+    "/rss",
     "#",
 ]
+DEFAULT_TITLE_EXCLUDE_EXACT = {
+    "news rss",
+    "features rss",
+    "reviews rss",
+    "rss feed",
+    "subscribe to our rss feed",
+}
 
 
 @dataclass
@@ -499,11 +508,19 @@ def _passes_text_filters(source: Source, title: str, url: str) -> bool:
     lowered_url = url.lower()
     include_keywords = [str(value).lower() for value in config.get("title_include_keywords", [])]
     exclude_keywords = [str(value).lower() for value in config.get("title_exclude_keywords", [])]
+    exclude_exact = DEFAULT_TITLE_EXCLUDE_EXACT | {
+        str(value).strip().lower() for value in config.get("title_exclude_exact", []) if str(value).strip()
+    }
+    url_includes = [str(value).lower() for value in config.get("url_include_patterns", [])]
     url_excludes = [str(value).lower() for value in config.get("url_exclude_patterns", DEFAULT_EXCLUDE_PATTERNS)]
 
+    if lowered_title.strip() in exclude_exact:
+        return False
     if include_keywords and not any(keyword in lowered_title for keyword in include_keywords):
         return False
     if exclude_keywords and any(keyword in lowered_title for keyword in exclude_keywords):
+        return False
+    if url_includes and not any(pattern in lowered_url for pattern in url_includes):
         return False
     if any(pattern in lowered_url for pattern in url_excludes):
         return False

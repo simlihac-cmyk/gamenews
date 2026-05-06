@@ -14,7 +14,13 @@ SOURCES = [
         "trust_type": TrustType.OFFICIAL,
         "region": Region.KR,
         "language": Language.KO,
-        "config": {"url_include_patterns": ["/kr/news"]},
+        "config": {
+            "item_selector": ".ncmn-softUnit--list",
+            "title_selector": ".ncmn-softUnit__name",
+            "link_selector": "a[href]",
+            "date_selector": ".ncmn-softUnit__release",
+            "url_include_patterns": ["/kr/news/article/", "/kr/event/", "/kr/switch/", "/kr/movie/", "/kr/interview/", "/kr/guide/"],
+        },
     },
     {
         "name": "한국닌텐도 발매 스케줄",
@@ -44,7 +50,16 @@ SOURCES = [
         "trust_type": TrustType.OFFICIAL,
         "region": Region.EU,
         "language": Language.EN,
-        "config": {"url_include_patterns": ["/News/", "/Games/"]},
+        "config": {
+            "item_selector": ".overview-news-element, li.page-list-group-item",
+            "title_selector": ".news-list-title, .page-title",
+            "link_selector": "a[href]",
+            "date_selector": ".date, .page-data",
+            "summary_selector": ".news-list-info p:not(.date):not(.news-list-title), .strapline",
+            "thumbnail_selector": "img",
+            "url_include_patterns": ["/en-gb/News/"],
+            "url_exclude_patterns": ["/Support/", "/Search/", "/feed", "/rss"],
+        },
     },
     {
         "name": "Nintendo Official YouTube Korea",
@@ -83,7 +98,18 @@ SOURCES = [
         "trust_type": TrustType.PRESS,
         "region": Region.GLOBAL,
         "language": Language.EN,
-        "config": {"url_include_patterns": ["/news/", "/platforms/nintendo/"]},
+        "config": {
+            "item_selector": "article.vgc-post--post",
+            "title_selector": ".headline a",
+            "link_selector": ".headline a",
+            "date_selector": "time",
+            "summary_selector": ".strapline",
+            "thumbnail_selector": "img",
+            "thumbnail_attr": "data-src",
+            "url_include_patterns": ["/news/", "/features/"],
+            "url_exclude_patterns": ["/feed", "/rss", "/category/", "/tag/", "/platforms/"],
+            "title_exclude_exact": ["News RSS", "Features RSS", "Reviews RSS", "RSS Feed"],
+        },
     },
     {
         "name": "GamingLeaksAndRumours Reddit RSS",
@@ -150,4 +176,3 @@ class Command(BaseCommand):
                 f"Franchises: {franchise_created} created, {franchise_updated} updated."
             )
         )
-
