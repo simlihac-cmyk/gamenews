@@ -70,12 +70,14 @@ class RawItemAdmin(admin.ModelAdmin):
         "source",
         "published_at",
         "published_at_precision",
+        "date_confidence",
+        "is_date_suspect",
         "rejection_reason",
         "extraction_confidence",
         "first_seen_at",
         "canonical_url",
     )
-    list_filter = ("source", "published_at", "published_at_precision", "rejection_reason", "first_seen_at")
+    list_filter = ("source", "published_at", "published_at_precision", "date_confidence", "is_date_suspect", "rejection_reason", "first_seen_at")
     search_fields = ("title", "url", "canonical_url", "source__name", "raw_text", "rejection_reason")
     readonly_fields = ("first_seen_at", "collected_at", "content_hash", "canonical_url_hash")
     date_hierarchy = "published_at"
@@ -85,6 +87,7 @@ class NewsItemFranchiseInline(admin.TabularInline):
     model = NewsItemFranchise
     extra = 0
     readonly_fields = ("matched_alias", "confidence_score")
+    fields = ("franchise", "matched_alias", "confidence_score", "is_primary")
 
 
 class NewsItemIssueInline(admin.TabularInline):
@@ -102,6 +105,8 @@ class NewsItemAdmin(admin.ModelAdmin):
         "category",
         "importance_score",
         "extraction_confidence",
+        "date_confidence",
+        "is_date_suspect",
         "is_backfill",
         "is_read",
         "is_bookmarked",
@@ -117,10 +122,21 @@ class NewsItemAdmin(admin.ModelAdmin):
         "is_bookmarked",
         "is_archived",
         "is_backfill",
+        "date_confidence",
+        "is_date_suspect",
         "importance_score",
     )
     search_fields = ("title", "url", "canonical_url", "source__name", "summary_ko")
-    readonly_fields = ("created_at", "updated_at", "normalized_title", "canonical_url_hash", "importance_reasons")
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "normalized_title",
+        "canonical_url_hash",
+        "importance_reasons",
+        "trust_reasons",
+        "entity_mentions",
+        "date_suspect_reason",
+    )
     date_hierarchy = "published_at"
     inlines = [NewsItemFranchiseInline, NewsItemIssueInline]
 

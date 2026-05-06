@@ -22,6 +22,11 @@ urlpatterns = [
     path("franchises/", views.franchise_list, name="franchise_list"),
     path("franchises/favorites/", views.franchise_favorites, name="franchise_favorites"),
     path("franchises/<slug:slug>/", views.franchise_detail, name="franchise_detail"),
+    path("about/", views.static_page, {"slug": "about"}, name="about"),
+    path("methodology/", views.static_page, {"slug": "methodology"}, name="methodology"),
+    path("corrections/", views.static_page, {"slug": "corrections"}, name="corrections"),
+    path("privacy/", views.static_page, {"slug": "privacy"}, name="privacy"),
+    path("terms/", views.static_page, {"slug": "terms"}, name="terms"),
     path("sitemap.xml", views.sitemap_xml, name="sitemap_xml"),
     path("robots.txt", views.robots_txt, name="robots_txt"),
 ]

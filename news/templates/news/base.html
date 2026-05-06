@@ -616,7 +616,14 @@
     {% block content %}{% endblock %}
   </main>
   <footer class="footer">
-    Nintendo Watch는 비공식 뉴스 모니터링/아카이브입니다. Nintendo 및 관련 상표는 각 권리자에게 있습니다.
+    <div>Nintendo Watch는 비공식 뉴스 모니터링/아카이브입니다. Nintendo 및 관련 상표는 각 권리자에게 있습니다.</div>
+    <div class="button-row" style="margin-top: 8px;">
+      <a href="{% url 'news:about' %}">소개</a>
+      <a href="{% url 'news:methodology' %}">방법론</a>
+      <a href="{% url 'news:corrections' %}">정정 요청</a>
+      <a href="{% url 'news:privacy' %}">개인정보처리방침</a>
+      <a href="{% url 'news:terms' %}">이용약관</a>
+    </div>
   </footer>
 </body>
 </html>

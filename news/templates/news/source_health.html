@@ -29,8 +29,16 @@
     <span>최근 신규</span>
   </div>
   <div class="stat-card">
-    <strong>{{ totals.items }}</strong>
-    <span>전체 뉴스</span>
+    <strong>{{ totals.raw_items }}</strong>
+    <span>원본 수집 항목</span>
+  </div>
+  <div class="stat-card">
+    <strong>{{ totals.public_items }}</strong>
+    <span>공개 타임라인 항목</span>
+  </div>
+  <div class="stat-card">
+    <strong>{{ totals.quarantined_items }}</strong>
+    <span>격리/중복/비공개 항목</span>
   </div>
 </div>
 <section class="card" style="margin-bottom: 14px;">
@@ -68,18 +76,11 @@
           <span class="muted">{{ source.source_type }} · {{ source.trust_type_ko }} · {% if source.enabled %}활성{% else %}비활성{% endif %}</span>
         </td>
         <td>
-          {% if not source.enabled %}
-            <span class="muted">비활성</span>
-          {% elif source.last_error %}
-            <span class="health-error">오류</span>
-          {% elif source.last_success_at %}
-            <span class="health-ok">정상</span>
-          {% else %}
-            <span class="muted">대기</span>
-          {% endif %}
+          <span class="badge {{ source.status_info.class }}">{{ source.status_info.label }}</span>
+          <div class="muted">{{ source.status_info.reason }}</div>
         </td>
-        <td>{{ source.last_checked_at|date:"Y-m-d H:i"|default:"없음" }}</td>
-        <td>{{ source.last_success_at|date:"Y-m-d H:i"|default:"없음" }}</td>
+        <td>{{ source.last_checked_at|date:"Y-m-d H:i"|default:"없음" }}{% if source.last_checked_at %} KST{% endif %}</td>
+        <td>{{ source.last_success_at|date:"Y-m-d H:i"|default:"없음" }}{% if source.last_success_at %} KST · {{ source.last_success_at|timesince }} 전 성공{% endif %}</td>
         <td>{{ source.raw_count }}</td>
         <td>{{ source.item_count }}</td>
         <td>{{ source.last_new_items_count }}</td>

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -12,16 +12,16 @@ from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.paginator import Paginator
 from django.db import connection
 from django.db.models import Case, Count, F, IntegerField, Max, Prefetch, Q, Sum, Value, When
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .forms import NewsItemFilterForm
-from .models import Franchise, Issue, IssueStatus, NewsItem, NewsItemIssue, Source, UserFranchiseFavorite
+from .models import Franchise, Issue, IssueStatus, NewsItem, NewsItemIssue, RawItem, Source, UserFranchiseFavorite
 from .services.collectors import collect_source, process_raw_item, recalculate_news_item
-from .services.quality import LOW_CONFIDENCE_THRESHOLD, is_generic_summary
+from .services.quality import LOW_CONFIDENCE_THRESHOLD, fallback_summary_for, is_generic_summary, public_excerpt
 
 
 PAGE_SIZE = 25
@@ -39,10 +39,14 @@ def _absolute_url(request, view_name: str, *args, query: str = "") -> str:
 
 
 def _public_items_queryset():
+    now = timezone.now()
     return NewsItem.objects.filter(
         is_archived=False,
         extraction_confidence__gte=LOW_CONFIDENCE_THRESHOLD,
         raw_item__rejection_reason="",
+        is_date_suspect=False,
+    ).filter(
+        Q(published_at__isnull=True) | Q(published_at__lte=now),
     )
 
 
@@ -80,6 +84,42 @@ def _item_description(item: NewsItem) -> str:
     return f"{item.source.name}에서 게시된 {item.title} 관련 소식입니다. 게시일 {published}, 수집일 {item.first_seen_at:%Y-%m-%d}."
 
 
+def _day_start(value):
+    return timezone.make_aware(datetime.combine(value, time.min), timezone=timezone.get_current_timezone())
+
+
+def _apply_datetime_range(queryset, field: str, *, date_from=None, date_to=None):
+    if date_from:
+        queryset = queryset.filter(**{f"{field}__gte": _day_start(date_from)})
+    if date_to:
+        queryset = queryset.filter(**{f"{field}__lt": _day_start(date_to + timedelta(days=1))})
+    elif date_from:
+        queryset = queryset.filter(**{f"{field}__lte": timezone.now()})
+    return queryset
+
+
+def _home_headline_sections() -> list[dict[str, object]]:
+    base = _public_items_queryset().select_related("source").prefetch_related("franchise_links__franchise")
+    return [
+        {
+            "title": "오늘의 핵심 5개",
+            "items": list(base.filter(trust_label__in=["official", "reported"]).order_by("-importance_score", "-confidence_score", F("published_at").desc(nulls_last=True))[:5]),
+            "empty": "아직 오늘 핵심으로 뽑을 항목이 없습니다.",
+        },
+        {
+            "title": "공식 확인된 소식",
+            "items": list(base.filter(trust_label="official").order_by("-confidence_score", "-importance_score", F("published_at").desc(nulls_last=True))[:5]),
+            "empty": "최근 공식 확인 소식이 없습니다.",
+        },
+        {
+            "title": "관찰 중인 루머",
+            "items": list(base.filter(Q(trust_label="rumor") | Q(category__in=["rumor", "leak"])).order_by("-importance_score", F("published_at").desc(nulls_last=True))[:5]),
+            "empty": "현재 표시할 루머 항목이 없습니다.",
+            "rumor": True,
+        },
+    ]
+
+
 def _sanitize_public_error(error: str) -> str:
     if not error:
         return ""
@@ -91,6 +131,20 @@ def _sanitize_public_error(error: str) -> str:
         if marker in value:
             return "상세 오류는 관리자에게만 표시됩니다."
     return value[:180]
+
+
+def _source_status(source: Source) -> dict[str, str]:
+    if not source.enabled:
+        return {"label": "비활성", "class": "state", "reason": (source.config or {}).get("inactive_reason", "관리자 비활성화")}
+    if source.last_error:
+        return {"label": "오류", "class": "debunked", "reason": _sanitize_public_error(source.last_error) or "최근 요청 실패"}
+    if not source.last_success_at:
+        return {"label": "지연", "class": "state", "reason": "아직 성공 기록 없음"}
+    elapsed = timezone.now() - source.last_success_at
+    stale_after = timedelta(minutes=max(source.poll_interval_minutes * 2, 360))
+    if elapsed > stale_after:
+        return {"label": "지연", "class": "state", "reason": f"{int(elapsed.total_seconds() // 3600)}시간 이상 지연"}
+    return {"label": "정상", "class": "confirmed", "reason": "최근 수집 성공"}
 
 
 def home(request):
@@ -149,7 +203,7 @@ def item_list(request):
         if data.get("source"):
             items = items.filter(source=data["source"])
         if data.get("franchise"):
-            items = items.filter(franchise_links__franchise=data["franchise"])
+            items = items.filter(franchise_links__franchise=data["franchise"], franchise_links__is_primary=True)
         if data.get("is_read") in {"true", "false"}:
             items = items.filter(is_read=data["is_read"] == "true")
         if data.get("is_bookmarked") in {"true", "false"}:
@@ -164,17 +218,19 @@ def item_list(request):
                     UserFranchiseFavorite.objects.filter(user=request.user).values_list("franchise_id", flat=True)
                 )
                 if favorite_ids:
-                    items = items.filter(franchise_links__franchise_id__in=favorite_ids)
+                    items = items.filter(franchise_links__franchise_id__in=favorite_ids, franchise_links__is_primary=True)
                 else:
                     items = items.none()
                     empty_state = "no_favorites"
         if data.get("min_importance") is not None:
             items = items.filter(importance_score__gte=data["min_importance"])
-        date_field = "first_seen_at__date" if sort == "detected" else "published_at__date"
-        if data.get("date_from"):
-            items = items.filter(**{f"{date_field}__gte": data["date_from"]})
-        if data.get("date_to"):
-            items = items.filter(**{f"{date_field}__lte": data["date_to"]})
+        date_field = "first_seen_at" if sort == "detected" else "published_at"
+        items = _apply_datetime_range(
+            items,
+            date_field,
+            date_from=data.get("date_from"),
+            date_to=data.get("date_to"),
+        )
 
     items = _order_items(items.distinct(), sort)
     paginator = Paginator(items, PAGE_SIZE)
@@ -208,6 +264,7 @@ def item_list(request):
         else:
             empty_state = "no_items"
 
+    headline_sections = _home_headline_sections() if not has_filter_params else []
     seo = _seo_context(
         request,
         canonical_url=_absolute_url(request, "news:item_list"),
@@ -225,6 +282,7 @@ def item_list(request):
             "empty_state": empty_state,
             "favorites_active": favorites_active,
             "has_filter_params": has_filter_params,
+            "headline_sections": headline_sections,
             **seo,
         },
     )
@@ -257,9 +315,17 @@ def item_detail(request, pk: int):
         "author": {"@type": "Organization", "name": item.source.name},
         "publisher": {"@type": "Organization", "name": "Nintendo Watch"},
         "mainEntityOfPage": {"@type": "WebPage", "@id": canonical_url},
+        "citation": item.url,
+        "isBasedOn": item.url,
+        "articleSection": item.trust_label_ko,
+        "inLanguage": item.language or "ko-KR",
     }
+    about = [link.franchise.name for link in item.franchise_links.all() if link.is_primary]
+    if about:
+        article_json_ld["about"] = about
     if item.published_at:
         article_json_ld["datePublished"] = item.published_at.isoformat()
+    show_summary = bool(item.summary_ko and not is_generic_summary(item.summary_ko))
     return render(
         request,
         "news/item_detail.html",
@@ -267,7 +333,9 @@ def item_detail(request, pk: int):
             "item": item,
             "issue_link": issue,
             "related_items": related_items,
-            "show_summary": bool(item.summary_ko and not is_generic_summary(item.summary_ko)),
+            "show_summary": show_summary,
+            "display_summary": item.summary_ko if show_summary else fallback_summary_for(item),
+            "public_excerpt": public_excerpt(item.raw_item.raw_text),
             "article_json_ld": json.dumps(article_json_ld, ensure_ascii=False),
             **_seo_context(
                 request,
@@ -279,10 +347,17 @@ def item_detail(request, pk: int):
 
 
 def issue_list(request):
+    now = timezone.now()
     issues = Issue.objects.annotate(
         item_count=Count(
             "news_links",
-            filter=Q(news_links__news_item__is_archived=False, news_links__news_item__extraction_confidence__gte=LOW_CONFIDENCE_THRESHOLD),
+            filter=Q(
+                news_links__news_item__is_archived=False,
+                news_links__news_item__extraction_confidence__gte=LOW_CONFIDENCE_THRESHOLD,
+                news_links__news_item__raw_item__rejection_reason="",
+                news_links__news_item__is_date_suspect=False,
+            )
+            & (Q(news_links__news_item__published_at__isnull=True) | Q(news_links__news_item__published_at__lte=now)),
             distinct=True,
         )
     )
@@ -333,7 +408,13 @@ def issue_list(request):
 def issue_detail(request, pk: int):
     issue = get_object_or_404(Issue, pk=pk)
     links = list(
-        issue.news_links.filter(news_item__is_archived=False, news_item__extraction_confidence__gte=LOW_CONFIDENCE_THRESHOLD)
+        issue.news_links.filter(
+            news_item__is_archived=False,
+            news_item__extraction_confidence__gte=LOW_CONFIDENCE_THRESHOLD,
+            news_item__raw_item__rejection_reason="",
+            news_item__is_date_suspect=False,
+        )
+        .filter(Q(news_item__published_at__isnull=True) | Q(news_item__published_at__lte=timezone.now()))
         .select_related("news_item", "news_item__source")
         .prefetch_related("news_item__franchise_links__franchise")
         .order_by(F("news_item__published_at").asc(nulls_last=True), "news_item__first_seen_at", "news_item__pk")
@@ -365,6 +446,7 @@ def source_list(request):
     ).order_by("name")
     for source in sources:
         source.public_last_error = _sanitize_public_error(source.last_error)
+        source.status_info = _source_status(source)
     return render(
         request,
         "news/source_list.html",
@@ -397,7 +479,9 @@ def source_health(request):
         "disabled": Source.objects.filter(enabled=False).count(),
         "errors": Source.objects.filter(enabled=True).exclude(last_error="").count(),
         "stale": Source.objects.filter(enabled=True).filter(Q(last_success_at__isnull=True) | Q(last_success_at__lt=stale_cutoff)).count(),
-        "items": NewsItem.objects.count(),
+        "raw_items": RawItem.objects.count(),
+        "public_items": _public_items_queryset().count(),
+        "quarantined_items": NewsItem.objects.exclude(pk__in=_public_items_queryset().values("pk")).count(),
         "last_new": Source.objects.aggregate(total=Sum("last_new_items_count"))["total"] or 0,
         "status": "오류" if Source.objects.filter(enabled=True).exclude(last_error="").exists() else "주의" if Source.objects.filter(enabled=True).filter(Q(last_success_at__isnull=True) | Q(last_success_at__lt=stale_cutoff)).exists() else "정상",
         "recent_errors": Source.objects.filter(enabled=True).exclude(last_error="").count(),
@@ -405,6 +489,7 @@ def source_health(request):
     }
     for source in sources:
         source.public_last_error = _sanitize_public_error(source.last_error)
+        source.status_info = _source_status(source)
     return render(
         request,
         "news/source_health.html",
@@ -460,7 +545,7 @@ def _backup_status(*, include_internal: bool = False) -> dict[str, object]:
 
 
 def franchise_list(request):
-    franchises = Franchise.objects.annotate(item_count=Count("news_links")).order_by("-priority", "name")
+    franchises = Franchise.objects.annotate(item_count=Count("news_links", filter=Q(news_links__is_primary=True))).order_by("-priority", "name")
     return render(
         request,
         "news/franchise_list.html",
@@ -478,7 +563,7 @@ def franchise_list(request):
 def franchise_favorites(request):
     if not request.user.is_authenticated:
         return redirect(f"{settings.LOGIN_URL}?next={request.path}")
-    franchises = list(Franchise.objects.annotate(item_count=Count("news_links")).order_by("-priority", "name"))
+    franchises = list(Franchise.objects.annotate(item_count=Count("news_links", filter=Q(news_links__is_primary=True))).order_by("-priority", "name"))
     if request.method == "POST":
         selected_ids = {int(value) for value in request.POST.getlist("franchises") if value.isdigit()}
         UserFranchiseFavorite.objects.filter(user=request.user).exclude(franchise_id__in=selected_ids).delete()
@@ -515,6 +600,7 @@ def franchise_detail(request, slug: str):
     items = (
         _public_items_queryset()
         .filter(franchise_links__franchise=franchise)
+        .filter(franchise_links__is_primary=True)
         .select_related("source")
         .prefetch_related("franchise_links__franchise")
     )
@@ -601,10 +687,24 @@ def sitemap_xml(request):
         {"loc": _absolute_url(request, "news:issue_list"), "lastmod": None},
         {"loc": _absolute_url(request, "news:franchise_list"), "lastmod": None},
         {"loc": _absolute_url(request, "news:source_list"), "lastmod": None},
+        {"loc": _absolute_url(request, "news:about"), "lastmod": None},
+        {"loc": _absolute_url(request, "news:methodology"), "lastmod": None},
+        {"loc": _absolute_url(request, "news:corrections"), "lastmod": None},
+        {"loc": _absolute_url(request, "news:privacy"), "lastmod": None},
+        {"loc": _absolute_url(request, "news:terms"), "lastmod": None},
     ]
     for item in _public_items_queryset().filter(published_at__isnull=False).select_related("source").order_by("-updated_at")[:1000]:
         urls.append({"loc": _absolute_url(request, "news:item_detail", item.pk), "lastmod": item.updated_at})
-    for issue in Issue.objects.filter(news_links__news_item__is_archived=False).distinct().order_by("-last_updated_at")[:500]:
+    for issue in (
+        Issue.objects.filter(
+            news_links__news_item__is_archived=False,
+            news_links__news_item__raw_item__rejection_reason="",
+            news_links__news_item__is_date_suspect=False,
+        )
+        .filter(Q(news_links__news_item__published_at__isnull=True) | Q(news_links__news_item__published_at__lte=timezone.now()))
+        .distinct()
+        .order_by("-last_updated_at")[:500]
+    ):
         urls.append({"loc": _absolute_url(request, "news:issue_detail", issue.pk), "lastmod": issue.last_updated_at})
     for franchise in Franchise.objects.order_by("slug"):
         urls.append({"loc": _absolute_url(request, "news:franchise_detail", franchise.slug), "lastmod": None})
@@ -618,6 +718,72 @@ def sitemap_xml(request):
         lines.append("  </url>")
     lines.append("</urlset>")
     return HttpResponse("\n".join(lines), content_type="application/xml")
+
+
+STATIC_PAGE_CONTENT = {
+    "about": {
+        "title": "소개",
+        "description": "Nintendo Watch는 비공식 닌텐도 뉴스 모니터링/아카이브입니다.",
+        "sections": [
+            ("무엇을 하는 곳인가요?", "Nintendo Watch는 공식 뉴스, 전문 매체 보도, 루머 출처를 모아 한국어로 빠르게 훑어볼 수 있게 정리하는 비공식 뉴스 모니터링 사이트입니다."),
+            ("권리 고지", "Nintendo 및 관련 상표, 게임명, 캐릭터명은 각 권리자에게 있습니다. 이 사이트는 Nintendo와 제휴하거나 승인받은 서비스가 아닙니다."),
+            ("운영", "운영자 연락처는 준비 중입니다. 수집은 출처별 설정에 따라 주기적으로 실행됩니다."),
+        ],
+    },
+    "methodology": {
+        "title": "방법론",
+        "description": "출처, 중요도, 신뢰도, 이슈 묶음 기준을 설명합니다.",
+        "sections": [
+            ("출처 유형", "공식 출처, 전문 매체, 루머/유출 커뮤니티를 구분해 수집하고 표시합니다."),
+            ("중요도와 신뢰도", "중요도는 뉴스 영향도와 관심도를, 신뢰도는 출처 성격과 공식 확인 여부를 나타냅니다. 루머는 중요도가 높아도 신뢰도는 낮게 표시될 수 있습니다."),
+            ("자동 분류 한계", "제목, 요약, URL, 출처 메타데이터를 이용해 자동 분류하므로 오분류가 생길 수 있습니다. 의심 항목은 격리하거나 재검토 대상으로 남깁니다."),
+        ],
+    },
+    "corrections": {
+        "title": "정정과 요청",
+        "description": "오분류, 삭제, 출처 추가, 정정 요청 안내입니다.",
+        "sections": [
+            ("정정 요청", "오분류, 잘못된 요약, 삭제 요청, 출처 추가 요청은 운영자 연락처가 준비되면 접수합니다."),
+            ("정정 이력", "정정 이력 공개 영역은 준비 중입니다."),
+        ],
+    },
+    "privacy": {
+        "title": "개인정보처리방침",
+        "description": "로그인, 쿠키, 개인화 기능에서 저장될 수 있는 정보를 설명합니다.",
+        "sections": [
+            ("저장 정보", "로그인 사용 시 계정 정보와 세션 정보가 저장될 수 있습니다. 읽음, 북마크, 관심 프랜차이즈 기능을 사용하면 해당 선택이 저장됩니다."),
+            ("쿠키와 세션", "로그인 유지와 CSRF 보호를 위해 쿠키와 세션을 사용합니다."),
+            ("문의", "개인정보 문의처는 준비 중입니다."),
+        ],
+    },
+    "terms": {
+        "title": "이용약관",
+        "description": "원문 저작권, 상표권, 자동 수집 정책과 책임 제한 안내입니다.",
+        "sections": [
+            ("원문 저작권", "원문 기사와 콘텐츠의 저작권은 각 권리자에게 있습니다. Nintendo Watch는 짧은 자체 요약과 원문 링크 중심으로 운영됩니다."),
+            ("상표권", "Nintendo 및 관련 상표는 각 권리자에게 있습니다."),
+            ("책임 제한", "자동 수집과 자동 분류 결과에는 오류가 있을 수 있으며, 루머/유출 정보는 공식 확인 전까지 사실로 간주하지 않습니다."),
+        ],
+    },
+}
+
+
+def static_page(request, slug: str):
+    page = STATIC_PAGE_CONTENT.get(slug)
+    if page is None:
+        raise Http404("Page not found")
+    return render(
+        request,
+        "news/static_page.html",
+        {
+            "static_page": page,
+            **_seo_context(
+                request,
+                canonical_url=_absolute_url(request, f"news:{slug}"),
+                description=page["description"],
+            ),
+        },
+    )
 
 
 def robots_txt(request):

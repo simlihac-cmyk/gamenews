@@ -82,32 +82,51 @@
   </details>
 </form>
 
+{% if not has_filter_params %}
+  <div class="grid-2" style="margin-bottom: 16px;">
+    {% for section in headline_sections %}
+      <section class="card">
+        <h2>{{ section.title }}</h2>
+        <div class="stack">
+          {% for headline in section.items %}
+            <div>
+              <div class="badge-row">
+                {% item_badges headline as headline_badges %}
+                {% for badge in headline_badges|slice:":3" %}
+                  <span class="badge {{ badge.class }}">{{ badge.label }}</span>
+                {% endfor %}
+              </div>
+              <a href="{% url 'news:item_detail' headline.pk %}"><strong>{{ headline.title|truncatechars:72 }}</strong></a>
+              <div class="meta">
+                <span>{{ headline.source.name }}</span>
+                {% if section.rumor %}<span>공식 확인 전인 루머/유출성 정보입니다</span>{% endif %}
+              </div>
+            </div>
+          {% empty %}
+            <div class="muted">{{ section.empty }}</div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endfor %}
+  </div>
+{% endif %}
+
 <div class="stack">
   {% for item in page.object_list %}
     <article class="card timeline-card {{ item.trust_label }}{% if item.is_read %} is-read{% endif %}{% if item.importance_score >= 80 %} important{% endif %}">
       <div class="item-main">
         <div class="badge-row">
-          {% if item.importance_score >= 80 %}<span class="badge important">중요</span>{% endif %}
-          <span class="badge {{ item.trust_label }}">{% if item.trust_label == "official" %}공식 출처{% else %}{{ item.trust_label_ko }}{% endif %}</span>
-          {% if item.category != "official" and item.category != "general" %}
-            <span class="badge {{ item.category|category_class }}">{{ item.category_ko }}</span>
-          {% endif %}
-          {% for tag in item.detected_tags %}
-            {% if tag == "direct" or tag == "release_date" or tag == "trailer" or tag == "switch2" %}
-              <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>
-            {% endif %}
+          {% item_badges item as badges %}
+          {% for badge in badges %}
+            <span class="badge {{ badge.class }}">{{ badge.label }}</span>
           {% endfor %}
-          {% if item.is_backfill %}<span class="badge state">과거 기사 수집</span>{% endif %}
-          {% if not item.published_at %}<span class="badge state">게시일 미상</span>{% endif %}
-          {% if item.is_bookmarked %}<span class="badge reported">북마크</span>{% endif %}
-          {% if item.is_read %}<span class="badge state">읽음</span>{% endif %}
         </div>
-        <h2 class="item-title"><a href="{% url 'news:item_detail' item.pk %}">{{ item.title }}</a></h2>
+        <h2 class="item-title"><a href="{% url 'news:item_detail' item.pk %}">{{ item.title|truncatechars:90 }}</a></h2>
         {% if item.summary_ko|show_summary %}<p class="summary compact">{{ item.summary_ko }}</p>{% endif %}
         <div class="meta">
           <span>{{ item.source.name }}</span>
-          <span>{% if item.published_at %}게시 {{ item.published_at|date:"Y-m-d H:i" }}{% else %}게시일 미상{% endif %}</span>
-          <span>수집 {{ item.first_seen_at|date:"Y-m-d H:i" }}</span>
+          <span>{% if item.published_at %}게시 {{ item.published_at|date:"Y-m-d H:i" }} KST{% else %}게시일 미상{% endif %}</span>
+          <span>수집 {{ item.first_seen_at|timesince }} 전</span>
         </div>
         {% if item.franchise_links.all %}
           <div class="franchise-row">
@@ -121,7 +140,7 @@
             {% if forloop.first %}
               <div class="issue-strip">
                 <span class="badge {{ issue_link.issue.status }}">{{ issue_link.issue.status_ko }}</span>
-                <a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title }}</a>
+                <a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title|truncatechars:90 }}</a>
                 <span class="muted">관련 {{ issue_link.issue_item_count }}건</span>
                 {% if issue_link.issue.official_confirmed_at %}
                   <span class="badge confirmed">공식 확인</span>

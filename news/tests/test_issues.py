@@ -196,6 +196,35 @@ class IssueGroupingTests(TestCase):
         self.assertContains(response, "관련 1건")
         self.assertContains(response, "루머 관찰 중")
 
+    def test_youtube_switch2_and_pikmin_bloom_do_not_merge(self):
+        Franchise.objects.create(
+            name="Pikmin",
+            slug="pikmin",
+            aliases=["Pikmin", "Pikmin Bloom"],
+            priority=80,
+        )
+        pikmin_raw = self.make_raw_item(
+            self.official_source,
+            "Game Pak Decor Pikmin arrive in Pikmin Bloom",
+            "https://official.example/pikmin-bloom-game-pak",
+            raw_text="Pikmin Bloom receives a new decor event.",
+        )
+        youtube_raw = self.make_raw_item(
+            self.official_source,
+            "You Can Watch YouTube On Switch 2 But It Is Not Pretty",
+            "https://official.example/youtube-on-switch-2",
+            raw_text="The YouTube app experience on Switch 2 is rough.",
+        )
+
+        pikmin_item, _ = process_raw_item(pikmin_raw)
+        youtube_item, _ = process_raw_item(youtube_raw)
+
+        self.assertEqual(Issue.objects.count(), 2)
+        self.assertNotEqual(
+            pikmin_item.issue_links.get().issue_id,
+            youtube_item.issue_links.get().issue_id,
+        )
+
     def test_item_search_finds_matching_title(self):
         raw_item = self.make_raw_item(
             self.official_source,

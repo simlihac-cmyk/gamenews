@@ -79,6 +79,12 @@ class PublishedAtPrecision(models.TextChoices):
     UNKNOWN = "unknown", "Unknown"
 
 
+class DateConfidence(models.TextChoices):
+    HIGH = "high", "High"
+    MEDIUM = "medium", "Medium"
+    LOW = "low", "Low"
+
+
 class NotificationChannel(models.TextChoices):
     NTFY = "ntfy", "ntfy"
     DISCORD = "discord", "Discord"
@@ -170,6 +176,9 @@ class RawItem(models.Model):
     canonical_url_hash = models.CharField(max_length=64, blank=True, db_index=True)
     extraction_confidence = models.PositiveSmallIntegerField(default=100)
     rejection_reason = models.CharField(max_length=80, blank=True, db_index=True)
+    date_confidence = models.CharField(max_length=16, choices=DateConfidence.choices, default=DateConfidence.HIGH)
+    is_date_suspect = models.BooleanField(default=False, db_index=True)
+    date_suspect_reason = models.CharField(max_length=120, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -188,6 +197,7 @@ class RawItem(models.Model):
             models.Index(fields=["content_hash"]),
             models.Index(fields=["canonical_url_hash"]),
             models.Index(fields=["rejection_reason"]),
+            models.Index(fields=["is_date_suspect", "published_at"]),
         ]
 
     def __str__(self) -> str:
@@ -221,7 +231,12 @@ class NewsItem(models.Model):
     canonical_url_hash = models.CharField(max_length=64, blank=True, db_index=True)
     extraction_confidence = models.PositiveSmallIntegerField(default=100)
     importance_reasons = models.JSONField(default=list, blank=True)
+    trust_reasons = models.JSONField(default=list, blank=True)
+    entity_mentions = models.JSONField(default=list, blank=True)
     thumbnail_url = models.URLField(max_length=1000, blank=True)
+    date_confidence = models.CharField(max_length=16, choices=DateConfidence.choices, default=DateConfidence.HIGH)
+    is_date_suspect = models.BooleanField(default=False, db_index=True)
+    date_suspect_reason = models.CharField(max_length=120, blank=True)
     is_read = models.BooleanField(default=False)
     is_bookmarked = models.BooleanField(default=False)
     is_archived = models.BooleanField(default=False)
@@ -246,6 +261,7 @@ class NewsItem(models.Model):
             models.Index(fields=["source"]),
             models.Index(fields=["canonical_url_hash"]),
             models.Index(fields=["extraction_confidence", "is_archived"]),
+            models.Index(fields=["is_date_suspect", "published_at"]),
         ]
 
     def __str__(self) -> str:
@@ -342,6 +358,7 @@ class NewsItemFranchise(models.Model):
     franchise = models.ForeignKey(Franchise, on_delete=models.CASCADE, related_name="news_links")
     matched_alias = models.CharField(max_length=255, blank=True)
     confidence_score = models.PositiveSmallIntegerField(default=100)
+    is_primary = models.BooleanField(default=True, db_index=True)
 
     class Meta:
         constraints = [

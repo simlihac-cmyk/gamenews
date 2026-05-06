@@ -45,6 +45,7 @@ SOURCES = [
             "link_selector": "a[href]",
             "date_selector": ".ncmn-softUnit__release",
             "url_include_patterns": ["/kr/news/article/", "/kr/event/", "/kr/switch/", "/kr/movie/", "/kr/interview/", "/kr/guide/"],
+            "reject_url_patterns": ["/kr/search", "/kr/news/rss", "/category/", "/tag/", "/all-games"],
         },
     },
     {
@@ -55,7 +56,11 @@ SOURCES = [
         "trust_type": TrustType.OFFICIAL,
         "region": Region.KR,
         "language": Language.KO,
-        "config": {"url_include_patterns": ["/kr/schedule", "/kr/software"]},
+        "config": {
+            "url_include_patterns": ["/kr/schedule", "/kr/software"],
+            "reject_url_patterns": ["/kr/search", "/kr/news/rss", "/category/", "/tag/"],
+            "quality_allow_title_patterns": [r".+"],
+        },
     },
     {
         "name": "Nintendo US What's New",
@@ -73,6 +78,7 @@ SOURCES = [
             "embedded_json_summary_fields": ['body.text({"characterLimit":250})'],
             "embedded_json_date_fields": ["publishDate"],
             "url_include_patterns": ["/us/whatsnew/"],
+            "reject_url_patterns": ["/us/search", "/us/store", "/news/rss", "/all-games", "/nintendo-direct"],
             "title_exclude_exact": ["Skip to main content"],
         },
     },
@@ -93,6 +99,7 @@ SOURCES = [
             "thumbnail_selector": "img",
             "url_include_patterns": ["/en-gb/News/"],
             "url_exclude_patterns": ["/Support/", "/Search/", "/feed", "/rss"],
+            "reject_url_patterns": ["/Support/", "/Search/", "/category/", "/tag/", "/all-games", "/nintendo-direct"],
         },
     },
     {
@@ -108,6 +115,7 @@ SOURCES = [
             "channel_id": "UCRCK5FCJtomQT3b88jXI_DA",
             "handle": "@nintendo_kr",
             "channel_url": "https://www.youtube.com/@nintendo_kr",
+            "reject_url_patterns": ["/playlist", "/shorts"],
             "note": "공식 채널 ID는 기록해 두었지만 현재 YouTube RSS endpoint가 404를 반환하므로 기본 비활성입니다.",
         },
     },
@@ -122,6 +130,8 @@ SOURCES = [
         "config": {
             "title_include_keywords": NINTENDO_TITLE_KEYWORDS,
             "title_exclude_keywords": ["podcast", "interview roundup"],
+            "reject_url_patterns": ["/category/", "/tag/", "/platform/", "/games/", "/feed"],
+            "title_exclude_exact": ["News RSS", "All games"],
         },
     },
     {
@@ -135,6 +145,8 @@ SOURCES = [
         "config": {
             "title_include_keywords": NINTENDO_TITLE_KEYWORDS,
             "title_exclude_keywords": ["soapbox", "talking point", "poll"],
+            "reject_url_patterns": ["/guides/", "/forums/", "/games/", "/news/rss", "/feeds/", "/all-games"],
+            "title_exclude_exact": ["News RSS", "Tips and tricks", "All Nintendo Switch games"],
         },
     },
     {
@@ -155,6 +167,7 @@ SOURCES = [
             "thumbnail_attr": "data-src",
             "url_include_patterns": ["/news/", "/features/"],
             "url_exclude_patterns": ["/feed", "/rss", "/category/", "/tag/", "/platforms/"],
+            "reject_url_patterns": ["/platforms/", "/category/", "/tag/", "/page/", "/news/rss", "/features/rss", "/reviews/rss"],
             "title_include_keywords": NINTENDO_TITLE_KEYWORDS,
             "title_exclude_keywords": ["VGC Live", "Patreon", "tickets are on sale"],
             "title_exclude_exact": ["News RSS", "Features RSS", "Reviews RSS", "RSS Feed"],
@@ -171,6 +184,8 @@ SOURCES = [
         "config": {
             "title_include_keywords": ["Nintendo", "Switch", "Switch 2", "Direct", "Mario", "Zelda", "Pokemon", "Pokémon"],
             "title_exclude_keywords": ["weekly discussion", "megathread", "job listing", "hiring"],
+            "reject_url_patterns": ["/search", "/wiki", "/about"],
+            "title_exclude_exact": ["News RSS"],
         },
     },
 ]

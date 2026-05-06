@@ -15,6 +15,7 @@
       <th>신뢰</th>
       <th>지역</th>
       <th>사용</th>
+      <th>상태</th>
       <th>성공</th>
       <th>마지막 확인</th>
       <th>최근 신규</th>
@@ -36,6 +37,7 @@
         <td>{{ source.trust_type_ko }}</td>
         <td>{{ source.region }}</td>
         <td>{% if source.enabled %}예{% else %}아니오{% endif %}</td>
+        <td><span class="badge {{ source.status_info.class }}">{{ source.status_info.label }}</span><br><span class="muted">{{ source.status_info.reason }}</span></td>
         <td>{{ source.last_success_at|date:"Y-m-d H:i"|default:"없음" }}</td>
         <td>{{ source.last_checked_at|date:"Y-m-d H:i"|default:"없음" }}</td>
         <td>{{ source.last_new_items_count }}</td>
@@ -51,7 +53,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="12">출처가 없습니다.</td></tr>
+      <tr><td colspan="13">출처가 없습니다.</td></tr>
     {% endfor %}
   </tbody>
 </table>

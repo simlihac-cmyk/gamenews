@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta, timezone as datetime_timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import feedparser
 import httpx
@@ -40,10 +41,12 @@ from .quality import (
     LOW_CONFIDENCE_THRESHOLD,
     article_rejection_reason,
     clean_title,
+    date_quality_update_fields,
     extraction_confidence_for,
     is_backfill_item,
     precision_for_datetime,
 )
+from .source_adapters import adapter_config
 from .summarizer import summarize_item
 from .text import (
     canonical_topic_from_title,
@@ -93,6 +96,10 @@ BROAD_ISSUE_TOKENS = {
     "nintendo",
     "switch",
     "switch2",
+    "mario",
+    "pokemon",
+    "pokémon",
+    "zelda",
     "official",
     "confirmed",
     "direct",
@@ -101,12 +108,17 @@ BROAD_ISSUE_TOKENS = {
     "update",
     "updates",
     "trailer",
+    "release",
+    "released",
     "sale",
     "sales",
     "game",
     "games",
     "닌텐도",
     "스위치",
+    "마리오",
+    "포켓몬",
+    "젤다",
     "공식",
     "뉴스",
 }
@@ -139,7 +151,7 @@ def fetch_enabled_sources():
 
 
 def _fetch_url(source: Source, url: str) -> httpx.Response:
-    config = source.config or {}
+    config = adapter_config(source)
     timeout = _bounded_float(config.get("timeout_seconds"), settings.COLLECTOR_TIMEOUT_SECONDS, minimum=1.0, maximum=30.0)
     retries = int(_bounded_float(config.get("retries"), 1, minimum=0, maximum=2))
     headers = _request_headers(source)
@@ -195,7 +207,7 @@ def _request_headers(source: Source) -> dict[str, str]:
         "Accept": "application/rss+xml, application/atom+xml, text/html;q=0.9, */*;q=0.8",
         "Accept-Language": "ko,en;q=0.8,ja;q=0.7",
     }
-    for name, value in (source.config or {}).get("http_headers", {}).items():
+    for name, value in adapter_config(source).get("http_headers", {}).items():
         if name.lower() in PROTECTED_HEADER_NAMES:
             logger.warning("Ignoring protected HTTP header in Source.config source=%s header=%s", source.slug, name)
             continue
@@ -313,7 +325,7 @@ def collect_rss(source: Source, *, limit: int | None = None, dry_run: bool = Fal
 
 
 def collect_youtube_rss(source: Source, *, limit: int | None = None, dry_run: bool = False) -> CollectResult:
-    config = source.config or {}
+    config = adapter_config(source)
     channel_id = (config.get("channel_id") or "").strip()
     feed_url = source.url or config.get("feed_url") or (
         f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}" if channel_id else ""
@@ -331,7 +343,7 @@ def collect_html(source: Source, *, limit: int | None = None, dry_run: bool = Fa
     if not source.url:
         raise ValueError("HTML source URL is empty")
     response = _fetch_url(source, source.url)
-    config = source.config or {}
+    config = adapter_config(source)
     soup = BeautifulSoup(response.text, config.get("parser", "html.parser"))
     result = CollectResult(source=source, requested_url=source.url)
 
@@ -362,7 +374,9 @@ def collect_html(source: Source, *, limit: int | None = None, dry_run: bool = Fa
 def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[NewsItem | None, bool]:
     display_title = clean_title(raw_item.title, raw_item.source.slug) or raw_item.title
     franchise_matches = detect_franchise_matches(display_title, raw_item.raw_text)
-    franchises = [match.franchise for match in franchise_matches]
+    primary_franchise_matches = [match for match in franchise_matches if match.is_primary]
+    franchises = [match.franchise for match in primary_franchise_matches]
+    date_quality = date_quality_update_fields(raw_item.published_at)
     confidence = extraction_confidence_for(
         title=raw_item.title,
         url=raw_item.canonical_url or raw_item.url,
@@ -381,6 +395,12 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
     if not rejection_reason and confidence < LOW_CONFIDENCE_THRESHOLD:
         rejection_reason = "low_extraction_confidence"
     updates: list[str] = []
+    for field, value in date_quality.items():
+        if getattr(raw_item, field) != value:
+            setattr(raw_item, field, value)
+            updates.append(field)
+    if date_quality["is_date_suspect"] and not rejection_reason:
+        rejection_reason = "date_suspect"
     if raw_item.rejection_reason != rejection_reason:
         raw_item.rejection_reason = rejection_reason
         updates.append("rejection_reason")
@@ -397,7 +417,19 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
         if hasattr(raw_item, "news_item"):
             raw_item.news_item.is_archived = True
             raw_item.news_item.extraction_confidence = confidence
-            raw_item.news_item.save(update_fields=["is_archived", "extraction_confidence", "updated_at"])
+            raw_item.news_item.date_confidence = date_quality["date_confidence"]
+            raw_item.news_item.is_date_suspect = bool(date_quality["is_date_suspect"])
+            raw_item.news_item.date_suspect_reason = str(date_quality["date_suspect_reason"])
+            raw_item.news_item.save(
+                update_fields=[
+                    "is_archived",
+                    "extraction_confidence",
+                    "date_confidence",
+                    "is_date_suspect",
+                    "date_suspect_reason",
+                    "updated_at",
+                ]
+            )
             return raw_item.news_item, False
         logger.info("Rejected raw item id=%s source=%s reason=%s title=%s", raw_item.pk, raw_item.source.slug, rejection_reason, raw_item.title)
         return None, False
@@ -441,6 +473,8 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
         "confidence_score": classification.confidence_score,
         "importance_score": importance,
         "importance_reasons": importance_reasons,
+        "trust_reasons": classification.trust_reasons,
+        "entity_mentions": _entity_mentions_payload(franchise_matches),
         "region": raw_item.source.region,
         "language": raw_item.source.language,
         "published_at": raw_item.published_at,
@@ -449,6 +483,9 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
         "is_backfill": is_backfill_item(raw_item.published_at, raw_item.first_seen_at),
         "extraction_confidence": confidence,
         "thumbnail_url": thumbnail_url or "",
+        "date_confidence": date_quality["date_confidence"],
+        "is_date_suspect": date_quality["is_date_suspect"],
+        "date_suspect_reason": date_quality["date_suspect_reason"],
     }
 
     with transaction.atomic():
@@ -468,7 +505,7 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
                     news_item = NewsItem.objects.get(raw_item=raw_item)
                 created = False
 
-        _sync_franchises(news_item, franchise_matches)
+        _sync_franchises(news_item, primary_franchise_matches)
         _link_issue(news_item)
     return news_item, created
 
@@ -478,13 +515,26 @@ def recalculate_news_item(news_item: NewsItem) -> NewsItem | None:
     return updated
 
 
+def _entity_mentions_payload(franchise_matches: list) -> list[dict[str, object]]:
+    return [
+        {
+            "name": match.franchise.name,
+            "slug": match.franchise.slug,
+            "matched_alias": match.matched_alias,
+            "confidence_score": match.confidence_score,
+            "is_primary": match.is_primary,
+        }
+        for match in franchise_matches
+    ]
+
+
 def _payload_from_feed_entry(source: Source, entry) -> dict[str, Any]:
     title = normalize_whitespace(entry.get("title", ""))
     link = _entry_link(entry)
     raw_html = _entry_content(entry)
     raw_text = strip_html(raw_html)
     raw_published_at_text = entry.get("published", "") or entry.get("updated", "") or entry.get("created", "")
-    published_at = _entry_datetime(entry)
+    published_at = _entry_datetime(entry, source=source)
     metadata = {
         "feed_id": entry.get("id") or entry.get("guid", ""),
         "tags": [tag.get("term") for tag in entry.get("tags", []) if tag.get("term")],
@@ -514,7 +564,7 @@ def _entry_link(entry) -> str:
 
 
 def _html_payloads_from_selectors(source: Source, soup: BeautifulSoup, page_html: str) -> list[dict[str, Any]]:
-    config = source.config or {}
+    config = adapter_config(source)
     payloads: list[dict[str, Any]] = []
     base_url = config.get("base_url") or source.url
     link_attr = config.get("link_attr", "href")
@@ -539,7 +589,7 @@ def _html_payloads_from_selectors(source: Source, soup: BeautifulSoup, page_html
         thumbnail_el = item.select_one(config["thumbnail_selector"]) if config.get("thumbnail_selector") else None
         thumbnail_url = normalize_url(_select_attr(thumbnail_el, thumbnail_attr), base_url=base_url) if thumbnail_el else ""
         date_value = _select_attr(date_el, date_attr) or _select_text(date_el)
-        published_at = _parse_datetime(date_value)
+        published_at = _parse_datetime(date_value, source=source)
         payloads.append(
             {
                 "source": source,
@@ -565,7 +615,7 @@ def _html_payloads_from_selectors(source: Source, soup: BeautifulSoup, page_html
 def _html_payloads_generic(source: Source, soup: BeautifulSoup, page_html: str) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     seen: set[str] = set()
-    config = source.config or {}
+    config = adapter_config(source)
     base_url = config.get("base_url") or source.url
     for link in soup.find_all("a", href=True):
         title = normalize_whitespace(link.get_text(" "))
@@ -579,7 +629,7 @@ def _html_payloads_generic(source: Source, soup: BeautifulSoup, page_html: str) 
         parent = link.find_parent(["article", "li", "div", "section"]) or link
         date_el = parent.find("time")
         date_value = _select_attr(date_el, "datetime") or _select_text(date_el) or _select_text(parent)
-        published_at = _parse_datetime(date_value)
+        published_at = _parse_datetime(date_value, source=source)
         thumbnail_el = parent.find("img")
         thumbnail_url = normalize_url(_select_attr(thumbnail_el, "src"), base_url=base_url) if thumbnail_el else ""
         payloads.append(
@@ -605,7 +655,7 @@ def _html_payloads_generic(source: Source, soup: BeautifulSoup, page_html: str) 
 
 
 def _html_payloads_from_embedded_json(source: Source, soup: BeautifulSoup, page_html: str) -> list[dict[str, Any]]:
-    config = source.config or {}
+    config = adapter_config(source)
     script = soup.select_one(config["embedded_json_selector"])
     if script is None:
         return []
@@ -645,7 +695,7 @@ def _html_payloads_from_embedded_json(source: Source, soup: BeautifulSoup, page_
         summary = normalize_whitespace(_json_first_value(item, summary_fields))
         author = normalize_whitespace(_json_first_value(item, author_fields))
         date_value = normalize_whitespace(_json_first_value(item, date_fields))
-        published_at = _parse_datetime(date_value)
+        published_at = _parse_datetime(date_value, source=source)
         payloads.append(
             {
                 "source": source,
@@ -722,7 +772,7 @@ def _combined_text(*parts: str) -> str:
 
 
 def _passes_text_filters(source: Source, title: str, url: str) -> bool:
-    config = source.config or {}
+    config = adapter_config(source)
     lowered_title = title.lower()
     lowered_url = url.lower()
     include_keywords = [str(value).lower() for value in config.get("title_include_keywords", [])]
@@ -761,6 +811,7 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
     canonical_url_hash = create_url_hash(canonical_url)
     content_hash = content_hash_for(title, canonical_url)
     published_at = payload.get("published_at")
+    date_quality = date_quality_update_fields(published_at)
     rejection_reason = article_rejection_reason(
         title=title,
         url=canonical_url,
@@ -785,6 +836,9 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
                 "url": url,
                 "canonical_url": canonical_url,
                 "rejection_reason": rejection_reason,
+                "date_confidence": date_quality["date_confidence"],
+                "is_date_suspect": date_quality["is_date_suspect"],
+                "date_suspect_reason": date_quality["date_suspect_reason"],
             }
         )
         return
@@ -807,6 +861,10 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
         if existing.extraction_confidence != extraction_confidence:
             existing.extraction_confidence = extraction_confidence
             update_fields.append("extraction_confidence")
+        for field, value in date_quality.items():
+            if getattr(existing, field) != value:
+                setattr(existing, field, value)
+                update_fields.append(field)
         if update_fields:
             existing.save(update_fields=update_fields)
         if not hasattr(existing, "news_item"):
@@ -829,6 +887,9 @@ def _store_payload(result: CollectResult, payload: dict[str, Any], *, dry_run: b
             canonical_url_hash=canonical_url_hash,
             extraction_confidence=extraction_confidence,
             rejection_reason=rejection_reason,
+            date_confidence=date_quality["date_confidence"],
+            is_date_suspect=date_quality["is_date_suspect"],
+            date_suspect_reason=date_quality["date_suspect_reason"],
             metadata=payload.get("metadata", {}) or {},
         )
     except IntegrityError:
@@ -849,12 +910,24 @@ def _sync_franchises(news_item: NewsItem, franchise_matches: list) -> None:
         link, created = NewsItemFranchise.objects.get_or_create(
             news_item=news_item,
             franchise=match.franchise,
-            defaults={"matched_alias": match.matched_alias, "confidence_score": match.confidence_score},
+            defaults={
+                "matched_alias": match.matched_alias,
+                "confidence_score": match.confidence_score,
+                "is_primary": match.is_primary,
+            },
         )
-        if not created and (link.matched_alias != match.matched_alias or link.confidence_score != match.confidence_score):
+        if created and link.is_primary != match.is_primary:
+            link.is_primary = match.is_primary
+            link.save(update_fields=["is_primary"])
+        if not created and (
+            link.matched_alias != match.matched_alias
+            or link.confidence_score != match.confidence_score
+            or link.is_primary != match.is_primary
+        ):
             link.matched_alias = match.matched_alias
             link.confidence_score = match.confidence_score
-            link.save(update_fields=["matched_alias", "confidence_score"])
+            link.is_primary = match.is_primary
+            link.save(update_fields=["matched_alias", "confidence_score", "is_primary"])
 
 
 def _link_issue(news_item: NewsItem) -> Issue:
@@ -917,7 +990,7 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
     cutoff = timezone.now() - timedelta(days=14)
     best_match: IssueMatch | None = None
     best_score = 0.0
-    news_franchise_ids = {link.franchise_id for link in news_item.franchise_links.all()}
+    news_franchise_ids = {link.franchise_id for link in news_item.franchise_links.all() if link.is_primary}
     candidates = Issue.objects.filter(last_updated_at__gte=cutoff).prefetch_related(
         "news_links__news_item__franchise_links",
     )[:200]
@@ -926,21 +999,54 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
         if not issue_tokens:
             continue
         overlap = len(tokens & issue_tokens)
+        shared_tokens = sorted(tokens & issue_tokens)
         issue_items = [link.news_item for link in issue.news_links.all()]
         issue_franchise_ids = {
             franchise_link.franchise_id
             for item in issue_items
             for franchise_link in item.franchise_links.all()
+            if franchise_link.is_primary
         }
         shared_franchise = bool(news_franchise_ids and news_franchise_ids & issue_franchise_ids)
+        duplicate_url = bool(
+            news_item.canonical_url
+            and any(item.pk != news_item.pk and item.canonical_url == news_item.canonical_url for item in issue_items)
+        )
         confirmation_candidate = (
             news_item.trust_label == TrustLabel.OFFICIAL
             and issue.status in {IssueStatus.RUMOR, IssueStatus.DEVELOPING}
         )
         similarity = difflib.SequenceMatcher(None, normalize_title(news_item.title), normalize_title(issue.title)).ratio()
-        same_story = overlap >= 2 and (shared_franchise or similarity >= 0.55)
-        confirmation = confirmation_candidate and shared_franchise and (overlap >= 1 or similarity >= 0.48)
+        strong_signals: list[str] = []
+        weak_signals: list[str] = []
+        if duplicate_url:
+            strong_signals.append("canonical_url")
+        if similarity >= 0.72:
+            strong_signals.append(f"title_similarity={similarity:.2f}")
+        elif similarity >= 0.55:
+            weak_signals.append(f"title_similarity={similarity:.2f}")
+        if overlap >= 3:
+            strong_signals.append(f"shared_specific_tokens={shared_tokens[:6]}")
+        elif overlap:
+            weak_signals.append(f"shared_specific_tokens={shared_tokens[:6]}")
+        if shared_franchise:
+            strong_signals.append("shared_primary_franchise")
+        if confirmation_candidate and _has_confirmation_context(f"{news_item.title} {news_item.summary_original}"):
+            strong_signals.append("official_confirmation_context")
+
+        same_story = duplicate_url or (len(strong_signals) >= 2 and (similarity >= 0.55 or overlap >= 2))
+        confirmation = confirmation_candidate and len(strong_signals) >= 2 and (
+            overlap >= 1 or similarity >= 0.55 or "official_confirmation_context" in strong_signals
+        )
         if not same_story and not confirmation:
+            logger.debug(
+                "Issue not linked item=%s issue=%s strong=%s weak=%s reason=%s",
+                news_item.pk,
+                issue.pk,
+                strong_signals,
+                weak_signals,
+                "Only weak or generic signals matched",
+            )
             continue
 
         score = overlap / max(min(len(tokens), len(issue_tokens)), 1)
@@ -949,13 +1055,18 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
         score += min(similarity * 0.2, 0.2)
         if confirmation_candidate:
             score += 0.15
+        if "official_confirmation_context" in strong_signals:
+            score += 0.25
 
-        threshold = 0.52 if confirmation else 0.6
+        threshold = 0.5 if confirmation else 0.68
+        if duplicate_url:
+            score = max(score, 0.95)
         if score > best_score and score >= threshold:
             relation = IssueRelation.CONFIRMATION if confirmation else IssueRelation.SAME_STORY
             explanation = (
-                f"{relation}: shared_franchise={shared_franchise}, overlap={overlap}, "
-                f"similarity={similarity:.2f}, score={score:.2f}"
+                f"decision=linked relation={relation}; strong_signals={strong_signals}; "
+                f"weak_signals={weak_signals}; shared_entities={shared_tokens[:8]}; "
+                f"overlap={overlap}; title_similarity={similarity:.2f}; score={score:.2f}"
             )
             best_match = IssueMatch(issue=issue, relation=relation, confidence=round(min(score, 1.0), 3), explanation=explanation)
             best_score = score
@@ -990,19 +1101,19 @@ def _entry_thumbnail(entry) -> str:
     return ""
 
 
-def _entry_datetime(entry):
+def _entry_datetime(entry, *, source: Source | None = None):
     for key in ("published_parsed", "updated_parsed", "created_parsed"):
         parsed = entry.get(key)
         if parsed:
             return timezone.datetime.fromtimestamp(calendar.timegm(parsed), tz=datetime_timezone.utc)
     for key in ("published", "updated", "created"):
-        parsed = _parse_datetime(entry.get(key, ""))
+        parsed = _parse_datetime(entry.get(key, ""), source=source)
         if parsed:
             return parsed
     return None
 
 
-def _parse_datetime(value: str):
+def _parse_datetime(value: str, *, source: Source | None = None):
     if not value:
         return None
     try:
@@ -1010,12 +1121,12 @@ def _parse_datetime(value: str):
     except (ValueError, TypeError, OverflowError):
         return None
     if timezone.is_naive(parsed):
-        parsed = timezone.make_aware(parsed, timezone=timezone.get_current_timezone())
+        parsed = timezone.make_aware(parsed, timezone=_source_timezone(source))
     return parsed
 
 
 def _is_likely_article_link(source: Source, title: str, url: str) -> bool:
-    config = source.config or {}
+    config = adapter_config(source)
     parsed_source = urlparse(source.url)
     parsed_url = urlparse(url)
     if parsed_url.scheme not in {"http", "https"}:
@@ -1031,11 +1142,8 @@ def _is_likely_article_link(source: Source, title: str, url: str) -> bool:
         "/article",
         "/articles",
         "/whatsnew",
-        "/topics",
         "/release",
         "/schedule",
-        "/platforms",
-        "/games",
     ]
     exclude_patterns = config.get("url_exclude_patterns") or DEFAULT_EXCLUDE_PATTERNS
     lowered_path = parsed_url.path.lower()
@@ -1044,6 +1152,38 @@ def _is_likely_article_link(source: Source, title: str, url: str) -> bool:
     if any(pattern.lower() in lowered_path for pattern in include_patterns):
         return True
     return len(title.split()) >= 4 and any(word in title.lower() for word in ["nintendo", "switch", "direct"])
+
+
+def _source_timezone(source: Source | None):
+    name = adapter_config(source).get("timezone") if source is not None else None
+    if not name:
+        return timezone.get_current_timezone()
+    try:
+        return ZoneInfo(str(name))
+    except ZoneInfoNotFoundError:
+        logger.warning("Unknown source timezone source=%s timezone=%s", getattr(source, "slug", ""), name)
+        return timezone.get_current_timezone()
+
+
+def _has_confirmation_context(value: str) -> bool:
+    normalized = normalize_title(value)
+    return any(
+        marker in normalized
+        for marker in [
+            "official",
+            "confirmed",
+            "announced",
+            "release date",
+            "launch",
+            "revealed",
+            "공식",
+            "확정",
+            "발표",
+            "공개",
+            "출시",
+            "발매",
+        ]
+    )
 
 
 def _error_text(exc: Exception) -> str:

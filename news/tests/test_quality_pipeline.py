@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from io import StringIO
+
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -75,6 +78,26 @@ class QualityPipelineTests(TestCase):
         self.assertEqual(raw.title, "04/30/26 Get the most out of Pokémon Pokopia Read more")
         self.assertEqual(news_item.title, "Get the most out of Pokémon Pokopia")
         self.assertEqual(news_item.raw_item.title, raw.title)
+
+    def test_audit_news_quality_dry_run_and_apply_quarantines_hub(self):
+        raw = self.make_raw(
+            "Nintendo 64",
+            "https://example.com/platforms/nintendo/nintendo-64",
+            published_at=timezone.now(),
+            raw_text="A platform hub page.",
+        )
+
+        dry_out = StringIO()
+        call_command("audit_news_quality", stdout=dry_out)
+        raw.refresh_from_db()
+        self.assertEqual(raw.rejection_reason, "")
+        self.assertIn("would be quarantined", dry_out.getvalue())
+
+        apply_out = StringIO()
+        call_command("audit_news_quality", "--apply", stdout=apply_out)
+        raw.refresh_from_db()
+        self.assertEqual(raw.rejection_reason, "hub_url")
+        self.assertIn("quarantined", apply_out.getvalue())
 
     def test_boilerplate_importance_is_zero(self):
         score = calculate_importance(source=self.source, title="Characters hub")

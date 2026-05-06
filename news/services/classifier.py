@@ -15,6 +15,7 @@ class ClassificationResult:
     category: str
     tags: list[str]
     confidence_score: int
+    trust_reasons: list[str]
 
 
 KEYWORDS = {
@@ -65,6 +66,7 @@ def classify_item(source: Source, title: str, raw_text: str = "") -> Classificat
         TrustLabel.RUMOR: 45,
         TrustLabel.UNKNOWN: 35,
     }.get(trust_label, 35)
+    trust_reasons = trust_reasons_for(source, trust_label)
     if tags:
         confidence = min(100, confidence + min(len(tags) * 3, 10))
 
@@ -73,6 +75,7 @@ def classify_item(source: Source, title: str, raw_text: str = "") -> Classificat
         category=category,
         tags=tags,
         confidence_score=confidence,
+        trust_reasons=trust_reasons,
     )
 
 
@@ -84,6 +87,16 @@ def classify_trust_label(source: Source) -> str:
     if source.trust_type == TrustType.RUMOR:
         return TrustLabel.RUMOR
     return TrustLabel.UNKNOWN
+
+
+def trust_reasons_for(source: Source, trust_label: str) -> list[str]:
+    if trust_label == TrustLabel.OFFICIAL:
+        return ["공식 출처에서 수집됨"]
+    if trust_label == TrustLabel.REPORTED:
+        return ["전문 매체 보도 출처"]
+    if trust_label == TrustLabel.RUMOR:
+        return ["루머/유출 커뮤니티 또는 RSS 경유", "공식 확인 전"]
+    return [f"{source.name} 출처 기준 확인 상태 미정"]
 
 
 def detect_tags(lower_text: str, normalized_text: str | None = None) -> list[str]:
@@ -112,14 +125,35 @@ def detect_franchises(title: str, raw_text: str = "") -> list[Franchise]:
 
 def detect_franchise_matches(title: str, raw_text: str = "") -> list[FranchiseMatch]:
     raw_haystack = f"{title} {raw_text}"
+    title_haystack = normalize_title(title)
+    first_sentence = _first_sentence(raw_text)
+    first_sentence_haystack = normalize_title(first_sentence)
     haystack = normalize_title(raw_haystack)
     matches: list[FranchiseMatch] = []
     for franchise in Franchise.objects.order_by("-priority", "name"):
         aliases = sorted([franchise.name, *(franchise.aliases or [])], key=lambda value: len(normalize_title(value)), reverse=True)
         for alias in aliases:
-            confidence = _alias_match_confidence(haystack, raw_haystack, alias)
+            title_confidence = _alias_match_confidence(title_haystack, title, alias)
+            first_sentence_confidence = _alias_match_confidence(first_sentence_haystack, first_sentence, alias)
+            body_confidence = _alias_match_confidence(haystack, raw_haystack, alias)
+            confidence = max(title_confidence, first_sentence_confidence, body_confidence)
             if confidence:
-                matches.append(FranchiseMatch(franchise=franchise, matched_alias=alias, confidence_score=confidence))
+                occurrence_count = _alias_occurrence_count(haystack, alias)
+                has_event_context = _has_primary_context(f"{title} {first_sentence}")
+                is_primary = bool(
+                    title_confidence
+                    or (first_sentence_confidence and has_event_context)
+                    or (occurrence_count >= 2 and _has_primary_context(raw_haystack))
+                )
+                adjusted_confidence = confidence if is_primary else min(confidence, 45)
+                matches.append(
+                    FranchiseMatch(
+                        franchise=franchise,
+                        matched_alias=alias,
+                        confidence_score=adjusted_confidence,
+                        is_primary=is_primary,
+                    )
+                )
                 break
     return matches
 
@@ -141,3 +175,47 @@ def _alias_match_confidence(haystack: str, raw_haystack: str, alias: str) -> int
     if re.fullmatch(r"[a-z0-9 ]+", needle):
         return 100 if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack) else 0
     return 100 if needle in haystack else 0
+
+
+def _alias_occurrence_count(haystack: str, alias: str) -> int:
+    needle = normalize_title(alias)
+    if not needle:
+        return 0
+    if re.fullmatch(r"[a-z0-9 ]+", needle):
+        return len(re.findall(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack))
+    return haystack.count(needle)
+
+
+def _first_sentence(raw_text: str) -> str:
+    text = (raw_text or "").strip()
+    if not text:
+        return ""
+    parts = re.split(r"(?<=[.!?。！？])\s+", text)
+    return parts[0][:260]
+
+
+def _has_primary_context(value: str) -> bool:
+    normalized = normalize_title(value)
+    return any(
+        marker in normalized
+        for marker in [
+            "announce",
+            "announced",
+            "reveal",
+            "revealed",
+            "release",
+            "launch",
+            "trailer",
+            "update",
+            "dlc",
+            "bundle",
+            "direct",
+            "movie",
+            "game",
+            "발표",
+            "공개",
+            "발매",
+            "출시",
+            "업데이트",
+        ]
+    )

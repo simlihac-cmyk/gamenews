@@ -1,0 +1,18 @@
+{% extends "news/base.html" %}
+{% block title %}{{ static_page.title }} - Nintendo Watch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ static_page.title }}</h1>
+    <div class="muted">{{ static_page.description }}</div>
+  </div>
+</div>
+<div class="stack">
+  {% for title, body in static_page.sections %}
+    <section class="card">
+      <h2>{{ title }}</h2>
+      <p>{{ body }}</p>
+    </section>
+  {% endfor %}
+</div>
+{% endblock %}

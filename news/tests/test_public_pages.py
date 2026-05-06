@@ -144,3 +144,86 @@ class PublicPageSecurityAndSeoTests(TestCase):
 
         robots = self.client.get(reverse("news:robots_txt"))
         self.assertContains(robots, "Sitemap:")
+
+    def test_static_transparency_pages_and_footer_links(self):
+        urls = [
+            reverse("news:about"),
+            reverse("news:methodology"),
+            reverse("news:corrections"),
+            reverse("news:privacy"),
+            reverse("news:terms"),
+        ]
+
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+
+        response = self.client.get(reverse("news:item_list"))
+        self.assertContains(response, reverse("news:about"))
+        self.assertContains(response, reverse("news:privacy"))
+        self.assertContains(response, reverse("news:terms"))
+
+    def test_detail_uses_fallback_summary_and_limits_public_excerpt(self):
+        long_text = " ".join([f"Sentence {index} has Nintendo Switch 2 details." for index in range(40)])
+        raw = RawItem.objects.create(
+            source=self.source,
+            title="Switch 2 rumor reportedly gains traction",
+            url="https://example.com/news/switch-2-rumor",
+            canonical_url="https://example.com/news/switch-2-rumor",
+            published_at=timezone.now(),
+            raw_text=long_text,
+            content_hash=create_content_hash("Switch 2 rumor reportedly gains traction", "https://example.com/news/switch-2-rumor"),
+        )
+        item, _created = process_raw_item(raw)
+
+        response = self.client.get(reverse("news:item_detail", args=[item.pk]))
+        html = response.content.decode()
+
+        self.assertContains(response, "아직 상세 요약은 없지만")
+        self.assertContains(response, "원문 보기")
+        excerpt = html.split('<div class="pre">', 1)[1].split("</div>", 1)[0]
+        self.assertLessEqual(len(excerpt), 520)
+
+    def test_list_deduplicates_labels_and_truncates_long_title(self):
+        source = Source.objects.create(
+            name="Reddit Rumor",
+            slug="reddit-rumor",
+            url="https://reddit.example/feed",
+            source_type=SourceType.RSS,
+            trust_type=TrustType.RUMOR,
+        )
+        title = "Switch 2 rumor leak " + ("very long title segment " * 5)
+        raw = RawItem.objects.create(
+            source=source,
+            title=title,
+            url="https://reddit.example/r/GamingLeaksAndRumours/comments/abc/switch-2-rumor",
+            canonical_url="https://reddit.example/r/GamingLeaksAndRumours/comments/abc/switch-2-rumor",
+            published_at=timezone.now(),
+            raw_text="A Switch 2 rumor leak was posted.",
+            content_hash=create_content_hash(title, "https://reddit.example/r/GamingLeaksAndRumours/comments/abc/switch-2-rumor"),
+        )
+        item, _created = process_raw_item(raw)
+
+        response = self.client.get(reverse("news:item_list"), {"q": item.title[:20]})
+        html = response.content.decode()
+
+        self.assertNotIn("루머 루머", html)
+        self.assertNotIn("트레일러 트레일러", html)
+        self.assertNotIn("발매일 발매일", html)
+        self.assertContains(response, item.title[:80])
+        self.assertNotIn(f">{item.title}<", html)
+
+        detail = self.client.get(reverse("news:item_detail", args=[item.pk]))
+        self.assertContains(detail, item.title)
+
+    def test_login_page_has_noindex_csrf_autocomplete_and_policy_links(self):
+        response = self.client.get(reverse("login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'content="noindex,nofollow"')
+        self.assertContains(response, "csrfmiddlewaretoken")
+        self.assertContains(response, 'autocomplete="username"')
+        self.assertContains(response, 'autocomplete="current-password"')
+        self.assertContains(response, reverse("news:privacy"))
+        self.assertContains(response, reverse("news:terms"))
