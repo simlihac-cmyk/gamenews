@@ -95,7 +95,7 @@ Host: gamenews.monosaccharide180.com
 X-Forwarded-Proto: https
 ```
 
-현재 production compose는 Mac mini 호스트의 `8010` 포트를 컨테이너 내부 `8000` 포트로 연결합니다. reverse proxy나 Cloudflare Tunnel은 `localhost:8010`으로 넘기면 됩니다.
+현재 production compose는 Mac mini 호스트의 `7974` 포트를 컨테이너 내부 `8000` 포트로 연결합니다. reverse proxy나 Cloudflare Tunnel은 `localhost:7974`로 넘기면 됩니다.
 
 로컬 개발 중에는 `.env.example`을 쓰면 되고, 그 경우 HTTPS 관련 값은 필요 없습니다.
 
