@@ -137,6 +137,9 @@
       grid-template-columns: minmax(220px, 2fr) repeat(5, minmax(120px, 1fr));
       gap: 10px;
     }
+    .filter.compact-filter {
+      grid-template-columns: minmax(260px, 2fr) minmax(150px, 1fr) auto;
+    }
     .filter label {
       display: block;
       font-size: 12px;
@@ -256,6 +259,10 @@
     .timeline-card.reported { border-left-color: var(--blue); }
     .timeline-card.rumor { border-left-color: var(--amber); }
     .timeline-card.unknown { border-left-color: #8a94a6; }
+    .timeline-card.important {
+      box-shadow: 0 0 0 1px rgba(215, 25, 32, 0.08);
+      background: linear-gradient(90deg, #fffafa 0, #fff 180px);
+    }
     .timeline-card.is-read {
       background: #fbfcfe;
     }
@@ -318,6 +325,7 @@
     .badge.reported { background: #eef5ff; border-color: #c8dcff; color: var(--blue); }
     .badge.rumor { background: #fff7ed; border-color: #ffd7a8; color: var(--amber); }
     .badge.unknown { background: #f2f4f7; color: #475467; }
+    .badge.important { background: #fff0f0; border-color: #f4b7b7; color: var(--red); }
     .badge.confirmed { background: #eaf7ee; border-color: #b8dfc2; color: var(--green); }
     .badge.developing { background: #eef5ff; border-color: #c8dcff; color: var(--blue); }
     .badge.stale { background: #f2f4f7; color: #475467; }
@@ -376,6 +384,23 @@
       flex-wrap: wrap;
       gap: 6px;
       margin-top: 10px;
+    }
+    .issue-strip {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--line);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .issue-strip a {
+      color: #2c3645;
+    }
+    .issue-strip a:hover {
+      color: var(--accent);
     }
     .stat-grid {
       display: grid;
@@ -441,6 +466,15 @@
     .timeline-entry.rumor .timeline-dot {
       border-color: var(--amber);
       color: var(--amber);
+    }
+    .issue-confirmed {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      border-color: #b8dfc2;
+      background: #f4fbf6;
+      color: #174d2b;
     }
     .grid-2 {
       display: grid;

@@ -1,4 +1,5 @@
 {% extends "news/base.html" %}
+{% load news_extras %}
 {% block title %}이슈 - Nintendo Watch{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -7,6 +8,32 @@
     <div class="muted">총 {{ total_count }}개 · 루머부터 공식 확인까지 이어지는 흐름</div>
   </div>
 </div>
+
+<div class="quick-tabs">
+  {% for status_value, status_label in status_filters %}
+    <a href="{% url 'news:issue_list' %}{% if status_value %}?status={{ status_value }}{% endif %}">{{ status_label }}</a>
+  {% endfor %}
+</div>
+
+<form method="get" class="filter compact-filter">
+  <div class="span-2">
+    <label for="issue-q">검색</label>
+    <input id="issue-q" type="search" name="q" value="{{ query }}" placeholder="이슈 제목, 토픽, 연결 뉴스 검색">
+  </div>
+  <div>
+    <label for="issue-status">상태</label>
+    <select id="issue-status" name="status">
+      {% for status_value, status_label in status_filters %}
+        <option value="{{ status_value }}"{% if selected_status == status_value %} selected{% endif %}>{{ status_label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-actions">
+    <button class="btn-primary" type="submit">적용</button>
+    <a class="btn" href="{% url 'news:issue_list' %}">초기화</a>
+  </div>
+</form>
+
 <div class="stack">
   {% for issue in page.object_list %}
     <article class="card">
@@ -31,9 +58,9 @@
 </div>
 {% if page.has_other_pages %}
   <div class="pagination">
-    {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">이전</a>{% endif %}
+    {% if page.has_previous %}<a class="btn" href="?{% if query_params %}{{ query_params }}&{% endif %}page={{ page.previous_page_number }}">이전</a>{% endif %}
     <span class="btn">{{ page.number }} / {{ page.paginator.num_pages }}</span>
-    {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">다음</a>{% endif %}
+    {% if page.has_next %}<a class="btn" href="?{% if query_params %}{{ query_params }}&{% endif %}page={{ page.next_page_number }}">다음</a>{% endif %}
   </div>
 {% endif %}
 {% endblock %}

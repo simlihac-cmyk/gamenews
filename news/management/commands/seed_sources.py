@@ -40,7 +40,16 @@ SOURCES = [
         "trust_type": TrustType.OFFICIAL,
         "region": Region.US,
         "language": Language.EN,
-        "config": {"url_include_patterns": ["/us/whatsnew", "/us/store/products", "/us/news"]},
+        "config": {
+            "embedded_json_selector": "script#__NEXT_DATA__",
+            "embedded_json_item_type": "NewsArticle",
+            "embedded_json_title_fields": ["title"],
+            "embedded_json_url_fields": ['url({"relative":true})'],
+            "embedded_json_summary_fields": ['body.text({"characterLimit":250})'],
+            "embedded_json_date_fields": ["publishDate"],
+            "url_include_patterns": ["/us/whatsnew/"],
+            "title_exclude_exact": ["Skip to main content"],
+        },
     },
     {
         "name": "Nintendo UK News",
@@ -64,13 +73,18 @@ SOURCES = [
     {
         "name": "Nintendo Official YouTube Korea",
         "slug": "nintendo-youtube-kr",
-        "url": "",
+        "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCRCK5FCJtomQT3b88jXI_DA",
         "source_type": SourceType.YOUTUBE_RSS,
         "trust_type": TrustType.OFFICIAL,
         "region": Region.KR,
         "language": Language.KO,
         "enabled": False,
-        "config": {"channel_id": "", "note": "YouTube 채널 ID를 입력하면 RSS 수집을 켤 수 있습니다."},
+        "config": {
+            "channel_id": "UCRCK5FCJtomQT3b88jXI_DA",
+            "handle": "@nintendo_kr",
+            "channel_url": "https://www.youtube.com/@nintendo_kr",
+            "note": "공식 채널 ID는 기록해 두었지만 현재 YouTube RSS endpoint가 404를 반환하므로 기본 비활성입니다.",
+        },
     },
     {
         "name": "Gematsu",

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from datetime import timedelta
+from urllib.parse import urlencode
+
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, Sum
+from django.db.models import Case, Count, IntegerField, Prefetch, Q, Sum, Value, When
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .forms import NewsItemFilterForm
-from .models import Franchise, Issue, NewsItem, Source
+from .models import Franchise, Issue, IssueStatus, NewsItem, NewsItemIssue, Source
 from .services.collectors import collect_source, process_raw_item, recalculate_news_item
 
 
@@ -23,7 +27,15 @@ def item_list(request):
     form = NewsItemFilterForm(request.GET or None)
     items = (
         NewsItem.objects.select_related("source")
-        .prefetch_related("franchise_links__franchise", "issue_links__issue")
+        .prefetch_related(
+            "franchise_links__franchise",
+            Prefetch(
+                "issue_links",
+                queryset=NewsItemIssue.objects.select_related("issue").annotate(
+                    issue_item_count=Count("issue__news_links", distinct=True)
+                ),
+            ),
+        )
         .filter(is_archived=False)
     )
 
@@ -63,6 +75,7 @@ def item_list(request):
     page = paginator.get_page(request.GET.get("page"))
     query_params = request.GET.copy()
     query_params.pop("page", None)
+    today = timezone.localdate()
     return render(
         request,
         "news/item_list.html",
@@ -71,6 +84,21 @@ def item_list(request):
             "page": page,
             "query_params": query_params.urlencode(),
             "total_count": paginator.count,
+            "quick_filters": [
+                {"label": "전체", "query": ""},
+                {"label": "오늘", "query": urlencode({"date_from": today.isoformat()})},
+                {"label": "7일", "query": urlencode({"date_from": (today - timedelta(days=7)).isoformat()})},
+                {"label": "30일", "query": urlencode({"date_from": (today - timedelta(days=30)).isoformat()})},
+                {"label": "중요 80+", "query": urlencode({"min_importance": 80})},
+                {"label": "읽지 않음", "query": urlencode({"is_read": "false"})},
+                {"label": "관심작만 보기", "query": urlencode({"favorites_only": "on"})},
+                {"label": "공식", "query": urlencode({"trust_label": "official"})},
+                {"label": "보도", "query": urlencode({"trust_label": "reported"})},
+                {"label": "루머", "query": urlencode({"trust_label": "rumor"})},
+                {"label": "Direct", "query": urlencode({"category": "direct"})},
+                {"label": "발매일", "query": urlencode({"category": "release_date"})},
+                {"label": "Switch 2", "query": urlencode({"q": "Switch 2"})},
+            ],
         },
     )
 
@@ -99,20 +127,65 @@ def item_detail(request, pk: int):
 
 
 def issue_list(request):
-    issues = Issue.objects.annotate(item_count=Count("news_links")).order_by("-last_updated_at")
+    issues = Issue.objects.annotate(item_count=Count("news_links", distinct=True))
+    status = request.GET.get("status", "").strip()
+    query = request.GET.get("q", "").strip()
+
+    if status in IssueStatus.values:
+        issues = issues.filter(status=status)
+    if query:
+        issues = issues.filter(
+            Q(title__icontains=query)
+            | Q(canonical_topic__icontains=query)
+            | Q(news_links__news_item__title__icontains=query)
+        )
+
+    issues = issues.order_by("-last_updated_at").distinct()
     paginator = Paginator(issues, PAGE_SIZE)
     page = paginator.get_page(request.GET.get("page"))
-    return render(request, "news/issue_list.html", {"page": page, "total_count": paginator.count})
+    query_params = request.GET.copy()
+    query_params.pop("page", None)
+    return render(
+        request,
+        "news/issue_list.html",
+        {
+            "page": page,
+            "total_count": paginator.count,
+            "query": query,
+            "selected_status": status,
+            "status_filters": [
+                ("", "전체"),
+                (IssueStatus.RUMOR, "루머 관찰 중"),
+                (IssueStatus.DEVELOPING, "전개 중"),
+                (IssueStatus.CONFIRMED, "공식 확정"),
+                (IssueStatus.DEBUNKED, "반박됨"),
+                (IssueStatus.STALE, "오래됨"),
+            ],
+            "query_params": query_params.urlencode(),
+        },
+    )
 
 
 def issue_detail(request, pk: int):
     issue = get_object_or_404(Issue, pk=pk)
-    links = (
+    links = list(
         issue.news_links.select_related("news_item", "news_item__source")
         .prefetch_related("news_item__franchise_links__franchise")
-        .order_by("-news_item__published_at", "-news_item__first_seen_at")
+        .order_by("news_item__published_at", "news_item__first_seen_at", "news_item__pk")
     )
-    return render(request, "news/issue_detail.html", {"issue": issue, "links": links})
+    official_count = sum(1 for link in links if link.news_item.trust_label == "official")
+    rumor_count = sum(1 for link in links if link.news_item.trust_label == "rumor")
+    return render(
+        request,
+        "news/issue_detail.html",
+        {
+            "issue": issue,
+            "links": links,
+            "item_count": len(links),
+            "official_count": official_count,
+            "rumor_count": rumor_count,
+        },
+    )
 
 
 def source_list(request):
@@ -124,13 +197,23 @@ def source_list(request):
 
 
 def source_health(request):
+    stale_cutoff = timezone.now() - timedelta(hours=24)
     sources = Source.objects.annotate(
         item_count=Count("news_items", distinct=True),
         raw_count=Count("raw_items", distinct=True),
-    ).order_by("enabled", "last_success_at", "name")
+        health_order=Case(
+            When(enabled=False, then=Value(3)),
+            When(last_error="", last_success_at__isnull=False, then=Value(2)),
+            When(last_error="", then=Value(1)),
+            default=Value(0),
+            output_field=IntegerField(),
+        ),
+    ).order_by("health_order", "name")
     totals = {
         "enabled": Source.objects.filter(enabled=True).count(),
-        "errors": Source.objects.exclude(last_error="").count(),
+        "disabled": Source.objects.filter(enabled=False).count(),
+        "errors": Source.objects.filter(enabled=True).exclude(last_error="").count(),
+        "stale": Source.objects.filter(enabled=True).filter(Q(last_success_at__isnull=True) | Q(last_success_at__lt=stale_cutoff)).count(),
         "items": NewsItem.objects.count(),
         "last_new": Source.objects.aggregate(total=Sum("last_new_items_count"))["total"] or 0,
     }

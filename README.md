@@ -35,6 +35,38 @@ docker compose exec web python manage.py fetch_news --limit 20
 http://127.0.0.1:7500/
 ```
 
+노트북에서 Mac mini의 개발 서버로 접속할 때는:
+
+```text
+http://SG-MACui-Macmini.local:7500/
+```
+
+### 개발 서버 한 줄 명령
+
+개발 서버 켜기:
+
+```bash
+cd /Users/sg_mac/gamenews_dev && docker compose up -d --build
+```
+
+개발 서버 로그 보기:
+
+```bash
+cd /Users/sg_mac/gamenews_dev && docker compose logs -f web
+```
+
+개발 서버 끄기:
+
+```bash
+cd /Users/sg_mac/gamenews_dev && docker compose down
+```
+
+처음 한 번만 DB 초기화가 필요하면:
+
+```bash
+cd /Users/sg_mac/gamenews_dev && docker compose exec web python manage.py migrate && docker compose exec web python manage.py seed_sources
+```
+
 배포용 실행:
 
 ```bash
@@ -224,6 +256,8 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
 이슈 상태는 `루머 관찰 중`, `전개 중`, `공식 확정`, `반박됨`, `오래됨`으로 표시됩니다. 공식 뉴스가 기존 루머/전개 중 이슈와 연결되면 `공식 확정`으로 바뀌고 공식 확인 시각이 기록됩니다.
 
+타임라인 카드에는 연결된 이슈 상태와 관련 뉴스 수가 표시됩니다. `/issues/`에서는 상태별 필터와 검색으로 루머 흐름을 빠르게 좁혀볼 수 있습니다.
+
 반박 여부는 자동 추론을 공격적으로 하지 않습니다. Django admin의 Issue 화면에서 이슈를 수동으로 `공식 확정`, `반박됨`, `오래됨`으로 표시하거나, 중복 이슈를 선택해서 가장 오래된 이슈로 병합할 수 있습니다.
 
 ### 수집 타임아웃
@@ -270,6 +304,18 @@ docker compose exec web python manage.py fetch_news --limit 20 --dry-run
 
 ```bash
 docker compose exec web python manage.py recalculate_items
+```
+
+오래된 루머/전개 중 이슈를 `오래됨`으로 표시:
+
+```bash
+docker compose exec web python manage.py mark_stale_issues --days 30
+```
+
+실제 변경 없이 확인:
+
+```bash
+docker compose exec web python manage.py mark_stale_issues --days 30 --dry-run
 ```
 
 테스트:
@@ -360,6 +406,20 @@ generic fallback URL 필터:
 }
 ```
 
+Next.js/embedded JSON 방식:
+
+```json
+{
+  "embedded_json_selector": "script#__NEXT_DATA__",
+  "embedded_json_item_type": "NewsArticle",
+  "embedded_json_title_fields": ["title"],
+  "embedded_json_url_fields": ["url({\"relative\":true})"],
+  "embedded_json_summary_fields": ["body.text({\"characterLimit\":250})"],
+  "embedded_json_date_fields": ["publishDate"],
+  "url_include_patterns": ["/us/whatsnew/"]
+}
+```
+
 HTTP 설정:
 
 ```json
@@ -388,5 +448,5 @@ YouTube RSS:
 - HTML 소스는 selector 품질에 따라 수집 정확도가 달라집니다.
 - 한국어 요약은 rule-based이며 외부 LLM API를 호출하지 않습니다.
 - 이슈 그룹핑은 최근 14일 제목 토큰, 카테고리, 프랜차이즈 기반의 단순 규칙입니다.
-- YouTube Korea 소스는 channel ID를 입력한 뒤 활성화해야 합니다.
+- YouTube Korea 소스는 공식 channel ID를 기록해 두었지만, 현재 YouTube RSS endpoint가 404를 반환하므로 기본 비활성입니다.
 - 검색은 아직 PostgreSQL full-text search가 아니라 단순 DB 검색입니다.

@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+from datetime import timedelta
+from io import StringIO
+
+from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
 
 from news.models import (
     Franchise,
@@ -39,6 +46,7 @@ class IssueGroupingTests(TestCase):
             aliases=["The Legend of Zelda", "젤다"],
             priority=100,
         )
+        self.user = get_user_model().objects.create_user(username="tester", password="password")
 
     def make_raw_item(self, source: Source, title: str, url: str, raw_text: str = "") -> RawItem:
         return RawItem.objects.create(
@@ -110,3 +118,57 @@ class IssueGroupingTests(TestCase):
         issue = Issue.objects.get()
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(issue.status, IssueStatus.CONFIRMED)
+
+    def test_mark_stale_issues_command_marks_old_open_issues(self):
+        issue = Issue.objects.create(
+            title="Old rumor",
+            canonical_topic="old rumor",
+            status=IssueStatus.RUMOR,
+            confidence_score=45,
+            first_seen_at=timezone.now() - timedelta(days=45),
+            last_updated_at=timezone.now() - timedelta(days=45),
+        )
+
+        out = StringIO()
+        call_command("mark_stale_issues", "--days", "30", stdout=out)
+
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, IssueStatus.STALE)
+        self.assertIn("1 issue(s) marked stale", out.getvalue())
+
+    def test_issue_list_filters_by_status(self):
+        Issue.objects.create(
+            title="Confirmed issue",
+            canonical_topic="confirmed issue",
+            status=IssueStatus.CONFIRMED,
+            confidence_score=90,
+        )
+        Issue.objects.create(
+            title="Rumor issue",
+            canonical_topic="rumor issue",
+            status=IssueStatus.RUMOR,
+            confidence_score=45,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("news:issue_list"), {"status": IssueStatus.CONFIRMED})
+
+        self.assertContains(response, "Confirmed issue")
+        self.assertNotContains(response, "Rumor issue")
+        self.assertContains(response, "공식 확정")
+
+    def test_item_list_shows_linked_issue_summary(self):
+        raw_item = self.make_raw_item(
+            self.rumor_source,
+            "Zelda remake leak reportedly planned",
+            "https://rumor.example/zelda-remake-leak",
+        )
+        news_item, _created = process_raw_item(raw_item)
+        issue = news_item.issue_links.select_related("issue").get().issue
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("news:item_list"))
+
+        self.assertContains(response, issue.title)
+        self.assertContains(response, "관련 1건")
+        self.assertContains(response, "루머 관찰 중")

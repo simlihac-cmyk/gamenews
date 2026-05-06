@@ -10,15 +10,9 @@
 </div>
 
 <div class="quick-tabs">
-  <a href="{% url 'news:item_list' %}">전체</a>
-  <a href="{% url 'news:item_list' %}?trust_label=official">공식</a>
-  <a href="{% url 'news:item_list' %}?trust_label=reported">보도</a>
-  <a href="{% url 'news:item_list' %}?trust_label=rumor">루머</a>
-  <a href="{% url 'news:item_list' %}?category=direct">Direct</a>
-  <a href="{% url 'news:item_list' %}?category=release_date">발매일</a>
-  <a href="{% url 'news:item_list' %}?category=trailer">트레일러</a>
-  <a href="{% url 'news:item_list' %}?q=Switch+2">Switch 2</a>
-  <a href="{% url 'news:item_list' %}?favorites_only=on">관심작만 보기</a>
+  {% for quick_filter in quick_filters %}
+    <a href="{% url 'news:item_list' %}{% if quick_filter.query %}?{{ quick_filter.query }}{% endif %}">{{ quick_filter.label }}</a>
+  {% endfor %}
 </div>
 
 <form method="get" class="filter">
@@ -77,9 +71,10 @@
 
 <div class="stack">
   {% for item in page.object_list %}
-    <article class="card timeline-card {{ item.trust_label }}{% if item.is_read %} is-read{% endif %}">
+    <article class="card timeline-card {{ item.trust_label }}{% if item.is_read %} is-read{% endif %}{% if item.importance_score >= 80 %} important{% endif %}">
       <div class="item-main">
         <div class="badge-row">
+          {% if item.importance_score >= 80 %}<span class="badge important">중요</span>{% endif %}
           <span class="badge {{ item.trust_label }}">{{ item.trust_label_ko }}</span>
           <span class="badge {{ item.category|category_class }}">{{ item.category_ko }}</span>
           {% for tag in item.detected_tags %}
@@ -103,6 +98,20 @@
               <a class="badge" href="{% url 'news:franchise_detail' link.franchise.slug %}">{{ link.franchise.name }}</a>
             {% endfor %}
           </div>
+        {% endif %}
+        {% if item.issue_links.all %}
+          {% for issue_link in item.issue_links.all %}
+            {% if forloop.first %}
+              <div class="issue-strip">
+                <span class="badge {{ issue_link.issue.status }}">{{ issue_link.issue.status_ko }}</span>
+                <a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title }}</a>
+                <span class="muted">관련 {{ issue_link.issue_item_count }}건</span>
+                {% if issue_link.issue.official_confirmed_at %}
+                  <span class="badge confirmed">공식 확인</span>
+                {% endif %}
+              </div>
+            {% endif %}
+          {% endfor %}
         {% endif %}
       </div>
       <div class="item-side">

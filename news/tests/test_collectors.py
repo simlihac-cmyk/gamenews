@@ -148,6 +148,53 @@ class CollectorHttpTests(TestCase):
         self.assertIn("mocked article summary", raw.raw_text)
         self.assertEqual(raw.metadata["thumbnail_url"], "https://example.com/images/thumb.jpg")
 
+    def test_html_embedded_json_config_extracts_news_articles(self):
+        html = """
+        <html><body>
+          <script id="__NEXT_DATA__" type="application/json">
+          {
+            "props": {
+              "cache": {
+                "NewsArticle:{\\"id\\":\\"1\\"}": {
+                  "__typename": "NewsArticle",
+                  "title": "Nintendo Switch 2 Direct announced",
+                  "body": {"text({\\"characterLimit\\":250})": "A short summary from embedded JSON."},
+                  "publishDate": "2026-05-06T10:00:00.000Z",
+                  "url({\\"relative\\":true})": "/us/whatsnew/switch-2-direct/"
+                }
+              }
+            }
+          }
+          </script>
+        </body></html>
+        """
+        source = Source.objects.create(
+            name="Next JSON",
+            slug="next-json",
+            url="https://example.com/us/whatsnew/",
+            source_type=SourceType.HTML,
+            trust_type=TrustType.OFFICIAL,
+            config={
+                "embedded_json_selector": "script#__NEXT_DATA__",
+                "embedded_json_item_type": "NewsArticle",
+                "embedded_json_title_fields": ["title"],
+                "embedded_json_url_fields": ['url({"relative":true})'],
+                "embedded_json_summary_fields": ['body.text({"characterLimit":250})'],
+                "embedded_json_date_fields": ["publishDate"],
+                "url_include_patterns": ["/us/whatsnew/"],
+            },
+        )
+
+        with patch("news.services.collectors.httpx.get", return_value=response_for(source.url, html)):
+            result = collect_source(source)
+
+        raw = RawItem.objects.get()
+        self.assertEqual(result.created_count, 1)
+        self.assertEqual(raw.title, "Nintendo Switch 2 Direct announced")
+        self.assertEqual(raw.canonical_url, "https://example.com/us/whatsnew/switch-2-direct")
+        self.assertEqual(raw.raw_text, "A short summary from embedded JSON.")
+        self.assertEqual(raw.metadata["html_source"], "embedded_json")
+
     def test_broken_source_sets_last_error_without_raising(self):
         source = Source.objects.create(
             name="Broken",

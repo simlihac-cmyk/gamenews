@@ -34,6 +34,14 @@ CATEGORY_CLASSES = {
     "official": "official",
 }
 
+RELATION_LABELS = {
+    "same_story": "같은 이야기",
+    "followup": "후속",
+    "confirmation": "공식 확인",
+    "debunk": "반박",
+    "related": "관련",
+}
+
 
 @register.filter
 def tag_label(value: str) -> str:
@@ -48,3 +56,8 @@ def tag_class(value: str) -> str:
 @register.filter
 def category_class(value: str) -> str:
     return CATEGORY_CLASSES.get(value, "")
+
+
+@register.filter
+def relation_label(value: str) -> str:
+    return RELATION_LABELS.get(value, value)

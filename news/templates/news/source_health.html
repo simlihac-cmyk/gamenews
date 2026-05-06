@@ -13,8 +13,16 @@
     <span>활성 출처</span>
   </div>
   <div class="stat-card">
+    <strong>{{ totals.disabled }}</strong>
+    <span>비활성 출처</span>
+  </div>
+  <div class="stat-card">
     <strong>{{ totals.errors }}</strong>
     <span>오류 출처</span>
+  </div>
+  <div class="stat-card">
+    <strong>{{ totals.stale }}</strong>
+    <span>24시간 이상 미성공</span>
   </div>
   <div class="stat-card">
     <strong>{{ totals.last_new }}</strong>
@@ -46,7 +54,9 @@
           <span class="muted">{{ source.source_type }} · {{ source.trust_type_ko }} · {% if source.enabled %}활성{% else %}비활성{% endif %}</span>
         </td>
         <td>
-          {% if source.last_error %}
+          {% if not source.enabled %}
+            <span class="muted">비활성</span>
+          {% elif source.last_error %}
             <span class="health-error">오류</span>
           {% elif source.last_success_at %}
             <span class="health-ok">정상</span>

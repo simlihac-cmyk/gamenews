@@ -7,25 +7,30 @@
     <div class="badge-row">
       <span class="badge {{ issue.status }}">{{ issue.status_ko }}</span>
       <span class="badge">신뢰도 {{ issue.confidence_score }}</span>
+      <span class="badge">연결 {{ item_count }}건</span>
+      {% if official_count %}<span class="badge official">공식 {{ official_count }}건</span>{% endif %}
+      {% if rumor_count %}<span class="badge rumor">루머 {{ rumor_count }}건</span>{% endif %}
     </div>
     <h1 style="margin-top: 10px;">{{ issue.title }}</h1>
     <div class="muted">최초 {{ issue.first_seen_at|date:"Y-m-d H:i" }} · 갱신 {{ issue.last_updated_at|date:"Y-m-d H:i" }}</div>
   </div>
 </div>
 {% if issue.official_confirmed_at %}
-  <section class="card" style="margin-bottom: 14px;">
-    공식 확인: {{ issue.official_confirmed_at|date:"Y-m-d H:i" }}
+  <section class="card issue-confirmed" style="margin-bottom: 14px;">
+    <strong>공식 확인</strong>
+    <span>{{ issue.official_confirmed_at|date:"Y-m-d H:i" }}</span>
   </section>
 {% endif %}
 <div class="issue-timeline">
   {% for link in links %}
     <div class="timeline-entry {{ link.news_item.trust_label }}">
-      <div class="timeline-dot">{{ forloop.revcounter }}</div>
+      <div class="timeline-dot">{{ forloop.counter }}</div>
       <div class="card">
         <div class="badge-row">
           <span class="badge {{ link.news_item.trust_label }}">{{ link.news_item.trust_label_ko }}</span>
           <span class="badge {{ link.news_item.category|category_class }}">{{ link.news_item.category_ko }}</span>
-          <span class="badge">{{ link.get_relation_display }}</span>
+          <span class="badge">{{ link.relation|relation_label }}</span>
+          {% if link.relation == "confirmation" %}<span class="badge confirmed">공식 확인</span>{% endif %}
           {% for tag in link.news_item.detected_tags %}
             {% if tag == "direct" or tag == "release_date" or tag == "trailer" or tag == "switch2" %}
               <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>

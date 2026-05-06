@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -281,6 +282,8 @@ def collect_html(source: Source, *, limit: int | None = None, dry_run: bool = Fa
 
     if config.get("item_selector"):
         payloads = _html_payloads_from_selectors(source, soup, response.text)
+    elif config.get("embedded_json_selector"):
+        payloads = _html_payloads_from_embedded_json(source, soup, response.text)
     else:
         payloads = _html_payloads_generic(source, soup, response.text)
 
@@ -488,6 +491,96 @@ def _html_payloads_generic(source: Source, soup: BeautifulSoup, page_html: str) 
             }
         )
     return payloads
+
+
+def _html_payloads_from_embedded_json(source: Source, soup: BeautifulSoup, page_html: str) -> list[dict[str, Any]]:
+    config = source.config or {}
+    script = soup.select_one(config["embedded_json_selector"])
+    if script is None:
+        return []
+
+    raw_json = script.string or script.get_text("", strip=True)
+    if not raw_json:
+        return []
+
+    try:
+        data = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        logger.warning("Failed to parse embedded JSON source=%s error=%s", source.slug, exc)
+        return []
+
+    item_type = config.get("embedded_json_item_type")
+    title_fields = config.get("embedded_json_title_fields") or ["title"]
+    url_fields = config.get("embedded_json_url_fields") or ['url({"relative":true})', "url", "href", "link"]
+    summary_fields = config.get("embedded_json_summary_fields") or ['body.text({"characterLimit":250})', "summary", "description"]
+    date_fields = config.get("embedded_json_date_fields") or ["publishDate", "publishedAt", "datePublished"]
+    author_fields = config.get("embedded_json_author_fields") or ["author.name", "author"]
+
+    payloads: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    base_url = config.get("base_url") or source.url
+
+    for item in _walk_json_dicts(data):
+        if item_type and item.get("__typename") != item_type:
+            continue
+        title = normalize_whitespace(_json_first_value(item, title_fields))
+        href = normalize_whitespace(_json_first_value(item, url_fields))
+        if not title or not href:
+            continue
+        url = normalize_url(href, base_url=base_url)
+        if url in seen or not _passes_text_filters(source, title, url):
+            continue
+        seen.add(url)
+        summary = normalize_whitespace(_json_first_value(item, summary_fields))
+        author = normalize_whitespace(_json_first_value(item, author_fields))
+        date_value = normalize_whitespace(_json_first_value(item, date_fields))
+        payloads.append(
+            {
+                "source": source,
+                "title": title,
+                "url": url,
+                "author": author,
+                "published_at": _parse_datetime(date_value),
+                "raw_html": json.dumps(item, ensure_ascii=False)[:5000],
+                "raw_text": summary,
+                "metadata": {
+                    "html_source": "embedded_json",
+                    "json_type": item_type or "",
+                    "page_url": source.url,
+                    "page_html_excerpt": page_html[:500],
+                },
+            }
+        )
+    return payloads
+
+
+def _walk_json_dicts(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_json_dicts(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_json_dicts(child)
+
+
+def _json_first_value(item: dict[str, Any], paths: list[str]) -> str:
+    for path in paths:
+        value = _json_path_value(item, str(path))
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _json_path_value(item: dict[str, Any], path: str):
+    value: Any = item
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    if isinstance(value, (dict, list)):
+        return None
+    return value
 
 
 def _select_text(element) -> str:
