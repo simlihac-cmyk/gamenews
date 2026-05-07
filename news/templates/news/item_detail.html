@@ -31,7 +31,14 @@
     {% if item.trust_label == "rumor" %}
       <p class="badge rumor">공식 확인 전인 루머/유출성 정보입니다</p>
     {% endif %}
-    <p class="summary">{{ display_summary }}</p>
+    <div class="summary-list">
+      {% for block in display_summary|summary_blocks %}
+        <div class="summary-row">
+          {% if block.label %}<span class="summary-label">{{ block.label }}</span>{% endif %}
+          <span class="summary-text">{{ block.text }}</span>
+        </div>
+      {% endfor %}
+    </div>
     <div class="badge-row">
       {% for tag in item.detected_tags %}
         <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>

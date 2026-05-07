@@ -82,6 +82,41 @@ def show_summary(value: str) -> bool:
     return bool(value and not is_generic_summary(value))
 
 
+@register.filter
+def summary_blocks(value: str) -> list[dict[str, str]]:
+    blocks: list[dict[str, str]] = []
+    for line in str(value or "").splitlines():
+        clean = " ".join(line.split())
+        if not clean:
+            continue
+        label, text = _split_summary_line(clean)
+        blocks.append({"label": label, "text": text})
+    if not blocks and value:
+        blocks.append({"label": "", "text": " ".join(str(value).split())})
+    return blocks
+
+
+@register.filter
+def summary_preview(value: str) -> list[dict[str, str]]:
+    blocks = summary_blocks(value)
+    priority = {"무슨 일?": 0, "왜 중요?": 1, "확인 상태": 2, "주의": 3}
+    blocks.sort(key=lambda block: priority.get(block["label"], 9))
+    return blocks[:2]
+
+
+def _split_summary_line(value: str) -> tuple[str, str]:
+    known_labels = ["무슨 일?", "왜 중요?", "확인 상태", "주의"]
+    for label in known_labels:
+        prefix = f"{label}:"
+        if value.startswith(prefix):
+            return label, value[len(prefix) :].strip()
+    if ":" in value:
+        label, text = value.split(":", 1)
+        if 1 <= len(label) <= 12:
+            return label.strip(), text.strip()
+    return "", value
+
+
 @register.simple_tag
 def item_badges(item):
     badges: list[dict[str, str]] = []

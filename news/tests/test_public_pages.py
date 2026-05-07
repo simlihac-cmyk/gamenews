@@ -182,8 +182,9 @@ class PublicPageSecurityAndSeoTests(TestCase):
         response = self.client.get(reverse("news:item_detail", args=[item.pk]))
         html = response.content.decode()
 
-        self.assertContains(response, "무슨 일?:")
-        self.assertContains(response, "왜 중요?:")
+        self.assertContains(response, 'class="summary-list"')
+        self.assertContains(response, "무슨 일?")
+        self.assertContains(response, "왜 중요?")
         self.assertContains(response, "원문 보기")
         excerpt = html.split('<div class="pre">', 1)[1].split("</div>", 1)[0]
         self.assertLessEqual(len(excerpt), 520)

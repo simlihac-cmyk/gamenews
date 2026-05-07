@@ -36,7 +36,16 @@
           {% if link.relation == "confirmation" or link.relation == "official_confirmation" %}<span class="badge confirmed">공식 확인</span>{% endif %}
         </div>
         <h2 class="item-title"><a href="{% url 'news:item_detail' link.news_item.pk %}">{{ link.news_item.title }}</a></h2>
-        {% if link.news_item.summary_ko|show_summary %}<p class="summary compact">{{ link.news_item.summary_ko }}</p>{% endif %}
+        {% if link.news_item.summary_ko|show_summary %}
+          <div class="summary-list compact">
+            {% for block in link.news_item.summary_ko|summary_preview %}
+              <div class="summary-row">
+                {% if block.label %}<span class="summary-label">{{ block.label }}</span>{% endif %}
+                <span class="summary-text">{{ block.text }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
         <div class="meta">
           <span>{{ link.news_item.source.name }}</span>
           <span>{% published_status link.news_item %}</span>

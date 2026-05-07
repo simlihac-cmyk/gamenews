@@ -322,10 +322,53 @@
       color: #2c3645;
       margin: 0 0 12px;
       white-space: pre-line;
+      line-height: 1.75;
+      overflow-wrap: anywhere;
     }
     .summary.compact {
       display: -webkit-box;
       -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .summary-list {
+      display: grid;
+      gap: 9px;
+      margin: 0 0 12px;
+    }
+    .summary-list.compact {
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .summary-row {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      color: #253040;
+      line-height: 1.65;
+      overflow-wrap: anywhere;
+    }
+    .summary-list.compact .summary-row {
+      grid-template-columns: 62px minmax(0, 1fr);
+      line-height: 1.5;
+    }
+    .summary-label {
+      color: #5f6c7d;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+    .summary-text {
+      min-width: 0;
+    }
+    .summary-text:only-child {
+      grid-column: 1 / -1;
+    }
+    .summary-list.compact .summary-text {
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
@@ -603,6 +646,11 @@
       .span-2 { grid-column: span 1; }
       .stat-grid { grid-template-columns: 1fr; }
       .item-title { font-size: 17px; }
+      .summary-row,
+      .summary-list.compact .summary-row {
+        grid-template-columns: 1fr;
+        gap: 2px;
+      }
     }
   </style>
 </head>

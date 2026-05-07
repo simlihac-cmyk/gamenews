@@ -21,7 +21,16 @@
         <span class="badge">중요도 {{ item.importance_score }}</span>
       </div>
       <h2 class="item-title"><a href="{% url 'news:item_detail' item.pk %}">{{ item.title }}</a></h2>
-      {% if item.summary_ko|show_summary %}<p class="summary">{{ item.summary_ko }}</p>{% endif %}
+      {% if item.summary_ko|show_summary %}
+        <div class="summary-list compact">
+          {% for block in item.summary_ko|summary_preview %}
+            <div class="summary-row">
+              {% if block.label %}<span class="summary-label">{{ block.label }}</span>{% endif %}
+              <span class="summary-text">{{ block.text }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
       <div class="meta">
         <span>{{ item.source.name }}</span>
         <span>{% published_status item %}</span>
