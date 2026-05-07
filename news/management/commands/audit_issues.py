@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 
 from news.models import Issue
-from news.services.issues import issue_review_reasons
+from news.services.issues import issue_review_metrics, issue_review_reasons
 
 
 class Command(BaseCommand):
@@ -23,12 +23,29 @@ class Command(BaseCommand):
         min_items = max(1, options["min_items"])
         for issue in qs:
             reasons = issue_review_reasons(issue)
-            item_count = issue.news_links.count()
-            if reasons or item_count >= min_items:
-                findings.append((issue, item_count, reasons))
+            metrics = issue_review_metrics(issue)
+            if reasons or metrics.item_count >= min_items:
+                findings.append((issue, metrics, reasons))
 
-        for issue, item_count, reasons in findings:
+        for issue, metrics, reasons in findings:
             reason_text = ", ".join(reasons) if reasons else "min_items_only"
-            self.stdout.write(f"issue #{issue.pk}: items={item_count} review_required={bool(reasons)} reasons={reason_text} | {issue.title}")
+            suggested_action = "mark_review_required" if reasons else "inspect"
+            self.stdout.write(
+                "issue #{id}: title={title} | items={items} same_story={same_story} "
+                "sources={sources} primary_game_types={primary_game_types} "
+                "avg_title_similarity={similarity:.2f} review_required={review_required} "
+                "reasons={reasons} suggested_action={action}".format(
+                    id=issue.pk,
+                    title=issue.title,
+                    items=metrics.item_count,
+                    same_story=metrics.same_story_count,
+                    sources=metrics.source_count,
+                    primary_game_types=metrics.primary_franchise_count,
+                    similarity=metrics.average_title_similarity,
+                    review_required=bool(reasons),
+                    reasons=reason_text,
+                    action=suggested_action,
+                )
+            )
 
         self.stdout.write(f"{len(findings)} issue(s) audited; dry-run/read-only.")

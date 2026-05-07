@@ -10,7 +10,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from news.models import Franchise, NewsContentType, NewsItem, RawItem, Source, SourceType, TrustType, UserFranchiseFavorite
+from news.models import Franchise, Issue, IssueRelation, NewsContentType, NewsItem, NewsItemIssue, RawItem, Source, SourceType, TrustType, UserFranchiseFavorite
 from news.services.collectors import process_raw_item
 from news.services.text import create_content_hash
 
@@ -284,6 +284,40 @@ class PublicPageSecurityAndSeoTests(TestCase):
         self.assertNotIn(static.title, headline_titles)
         self.assertNotIn(review_item.title, headline_titles)
 
+    def test_home_headline_fallback_uses_recent_detected_candidates(self):
+        recent = self.make_item("Switch 2 release date official reveal fallback", published_at=timezone.now() - timedelta(days=1))
+        NewsItem.objects.filter(pk=recent.pk).update(importance_score=90, nintendo_relevance_score=4)
+
+        response = self.client.get(reverse("news:item_list"))
+        headline_titles = [item.title for section in response.context["headline_sections"] for item in section["items"]]
+
+        self.assertIn(recent.title, headline_titles)
+
+    def test_public_issue_pages_hide_clustering_debug_for_anonymous_and_show_for_staff(self):
+        issue = Issue.objects.create(title="Debug issue", canonical_topic="debug issue")
+        item = self.make_item("Debug issue same story", published_at=timezone.now())
+        item.issue_links.all().delete()
+        NewsItemIssue.objects.create(
+            news_item=item,
+            issue=issue,
+            relation=IssueRelation.SAME_STORY,
+            relation_confidence=0.9,
+            explanation="decision=linked same_story: shared_franchise=True score=1.18",
+            decision_debug={"decision": "linked", "score": 1.18},
+        )
+
+        with override_settings(DEBUG=False):
+            anonymous = self.client.get(reverse("news:issue_detail", args=[issue.pk]))
+        self.assertNotContains(anonymous, "same_story:")
+        self.assertNotContains(anonymous, "score=1.18")
+        self.assertContains(anonymous, "같은 이야기")
+
+        self.client.force_login(self.staff)
+        with override_settings(DEBUG=False):
+            staff = self.client.get(reverse("news:issue_detail", args=[issue.pk]))
+        self.assertContains(staff, "same_story:")
+        self.assertContains(staff, "score=1.18")
+
     def test_source_attribution_rules_hide_unhelpful_original_source_placeholder(self):
         official = self.make_item("Switch 2 source attribution announced", published_at=timezone.now())
         press_source = Source.objects.create(
@@ -328,6 +362,18 @@ class PublicPageSecurityAndSeoTests(TestCase):
         self.assertNotIn("원출처 확인 필요", official_html)
         self.assertNotIn("원출처 확인 필요", press_html)
         self.assertIn("원출처 확인 필요", rumor_html)
+
+    def test_item_detail_hides_recalculation_placeholder_reasons(self):
+        item = self.make_item("Switch 2 reason placeholder item", published_at=timezone.now())
+        NewsItem.objects.filter(pk=item.pk).update(
+            importance_reasons=["재계산 필요"],
+            trust_reasons=["재계산 필요"],
+        )
+
+        response = self.client.get(reverse("news:item_detail", args=[item.pk]))
+
+        self.assertNotContains(response, "재계산 필요")
+        self.assertContains(response, "점수 설명 준비 중")
 
     def test_login_page_has_noindex_csrf_autocomplete_and_policy_links(self):
         response = self.client.get(reverse("login"))

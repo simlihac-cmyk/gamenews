@@ -53,6 +53,7 @@ SOURCE_ADAPTERS: dict[str, dict[str, Any]] = {
         "timezone": "America/Los_Angeles",
         "language": "en",
         "region": "US",
+        "generic_title_selector": "h1, h2, h3, h4, [class*='title'], [class*='headline']",
         "embedded_json_title_fields": ["headline", "name", "title"],
         "reject_url_patterns": ["/us/search", "/us/store", "/us/games", "/us/switch", "/us/hardware", "/us/gaming-systems", "/news/rss"],
     },
@@ -61,6 +62,7 @@ SOURCE_ADAPTERS: dict[str, dict[str, Any]] = {
         "language": "en",
         "region": "EU",
         "title_selector": "h2 a, h3 a, .news-list-title a, .page-title a, .news-list-title, .page-title",
+        "generic_title_selector": "h1, h2, h3, h4, .news-list-title, .page-title, [class*='title'], [class*='headline']",
         "reject_url_patterns": ["/Hardware/", "/Games/", "/Support/", "/Search/", "/Nintendo-eShop/", "/Nintendo-Switch-2/", "/Nintendo-Switch/", "/news/rss"],
     },
     "nintendo-youtube-kr": {

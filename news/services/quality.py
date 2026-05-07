@@ -113,9 +113,25 @@ BODY_START_PATTERNS = [
     r"In this article",
     r"Learn more",
     r"Read more",
+    r"Take a look",
+    r"What(?:'|’)s new",
+    r"Let(?:'|’)s take a look",
 ]
 BODY_START_RE = re.compile(r"\s+(?:" + "|".join(BODY_START_PATTERNS) + r").*$", flags=re.IGNORECASE)
 BODY_START_ANYWHERE_RE = re.compile(r"(?:" + "|".join(BODY_START_PATTERNS) + r")", flags=re.IGNORECASE)
+DATE_TOKEN_RE = r"(?:\d{1,2}/\d{1,2}/\d{2,4}|\d{4}[.-]\d{1,2}[.-]\d{1,2})"
+LEADING_DATE_CATEGORY_RE = re.compile(
+    rf"^{DATE_TOKEN_RE}\s*\|\s*Nintendo Switch(?:\s*2)?\s+",
+    flags=re.IGNORECASE,
+)
+LEADING_DATE_RE = re.compile(
+    rf"^{DATE_TOKEN_RE}\s*[-–—:·|]?\s*",
+    flags=re.IGNORECASE,
+)
+NINTENDO_CATEGORY_PIPE_RE = re.compile(
+    rf"\s+{DATE_TOKEN_RE}(?:\s+{DATE_TOKEN_RE})?\s*\|\s*Nintendo Switch(?:\s*2)?\b.*$",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -144,12 +160,17 @@ def clean_title(title: str, source_slug: str | None = None) -> str:
     value = normalize_whitespace(title)
     value = re.sub(r"\s*\bRead more\b.*$", "", value, flags=re.IGNORECASE)
     value = re.sub(
-        r"^(?:\d{1,2}/\d{1,2}/\d{2,4}|\d{4}[.-]\d{1,2}[.-]\d{1,2})\s*[-–—:·|]?\s*",
-        "",
+        rf"^(Nintendo eShop Highlights)\s*[-–—]\s*{DATE_TOKEN_RE}(?:\s+{DATE_TOKEN_RE})?\s*\|\s*Nintendo Switch(?:\s*2)?\b.*$",
+        r"\1",
         value,
+        flags=re.IGNORECASE,
     )
+    value = NINTENDO_CATEGORY_PIPE_RE.sub("", value)
+    value = LEADING_DATE_CATEGORY_RE.sub("", value)
+    value = LEADING_DATE_RE.sub("", value)
     value = re.sub(r"^뉴스\s+\d{4}[.-]\d{1,2}[.-]\d{1,2}\s*[-–—:·|]?\s*", "", value)
     value = re.sub(r"\s+뉴스\s+\d{4}[.-]\d{1,2}[.-]\d{1,2}\s*$", "", value)
+    value = re.sub(r"\s+\|\s*Nintendo Switch(?:\s*2)?\s*$", "", value, flags=re.IGNORECASE)
     value = re.sub(
         r"^(?:News|Guide|Feature|Video|Gallery|Review|Random|Talking Point|Rumou?r):\s+",
         "",
@@ -390,6 +411,8 @@ def classify_content_type(*, title: str, url: str, raw_text: str = "", source: S
         return NewsContentType.LIST_PAGE
     if any(marker in normalized for marker in ["which nintendo switch is right for you", "support", "privacy", "terms"]):
         return NewsContentType.STATIC_PAGE
+    if any(marker in lowered_title for marker in ["nintendo eshop highlights", "eshop highlights"]):
+        return NewsContentType.LIST_PAGE
     if any(marker in lowered_title for marker in ["roundup", "breakdown", "rumour round-up", "rumor roundup", "summary", "everything announced"]):
         return NewsContentType.ROUNDUP
     if any(marker in path for marker in ["/guides/", "/guide/"]) or "guide" in normalized:
@@ -401,6 +424,19 @@ def classify_content_type(*, title: str, url: str, raw_text: str = "", source: S
     if source and source.trust_type == TrustType.OFFICIAL:
         return NewsContentType.OFFICIAL_NOTICE
     return NewsContentType.NEWS_ARTICLE
+
+
+def series_marker_for(title: str, raw_text: str = "", url: str = "") -> str:
+    normalized = normalize_title(f"{title} {raw_text[:240]} {url}")
+    if "nintendo eshop highlights" in normalized or "eshop highlights" in normalized:
+        return "eshop_highlights"
+    if "ask the developer" in normalized:
+        return "ask_the_developer"
+    if "development insights" in normalized:
+        return "development_insights"
+    if "whats new" in normalized or "what s new" in normalized:
+        return "whats_new"
+    return ""
 
 
 def is_low_quality_for_headline(item: NewsItem) -> bool:

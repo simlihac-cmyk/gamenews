@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 
 from news.models import Issue
-from news.services.issues import refresh_issue_review_status
+from news.services.issues import issue_review_metrics, refresh_issue_review_status
 
 
 class Command(BaseCommand):
@@ -34,10 +34,14 @@ class Command(BaseCommand):
             if would_change:
                 changed += 1
             if review_required or would_change:
+                metrics = issue_review_metrics(issue)
                 prefix = "UPDATE" if apply and would_change else "DRY-RUN"
                 self.stdout.write(
                     f"{prefix} issue #{issue.pk}: review_required={review_required} "
-                    f"reasons={', '.join(reasons) or '-'} | {issue.title}"
+                    f"items={metrics.item_count} sources={metrics.source_count} "
+                    f"primary_game_types={metrics.primary_franchise_count} "
+                    f"avg_title_similarity={metrics.average_title_similarity:.2f} "
+                    f"reasons={', '.join(reasons) or '-'} suggested_action=mark_review_required | {issue.title}"
                 )
             if apply and would_change:
                 issue.review_required = review_required

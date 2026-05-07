@@ -84,7 +84,7 @@ class IssueGroupingTests(TestCase):
         )
         official_raw = self.make_raw_item(
             self.official_source,
-            "The Legend of Zelda release date announced",
+            "The Legend of Zelda remake release date announced",
             "https://official.example/zelda-release-date",
             raw_text="Nintendo shared the release date in an official announcement.",
         )
@@ -100,7 +100,7 @@ class IssueGroupingTests(TestCase):
         self.assertIsNotNone(issue.official_confirmed_at)
         self.assertEqual(official_link.relation, IssueRelation.OFFICIAL_CONFIRMATION)
 
-    def test_shared_franchise_can_group_low_token_overlap_confirmation(self):
+    def test_official_confirmation_needs_franchise_and_event_overlap(self):
         rumor_raw = self.make_raw_item(
             self.rumor_source,
             "Zelda remake leak",
@@ -108,7 +108,7 @@ class IssueGroupingTests(TestCase):
         )
         official_raw = self.make_raw_item(
             self.official_source,
-            "The Legend of Zelda launches next year",
+            "The Legend of Zelda remake launches next year",
             "https://official.example/zelda-launch",
             raw_text="An official release date window was announced.",
         )
@@ -119,6 +119,24 @@ class IssueGroupingTests(TestCase):
         issue = Issue.objects.get()
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(issue.status, IssueStatus.CONFIRMED)
+
+    def test_shared_franchise_only_does_not_confirm_same_story(self):
+        rumor_raw = self.make_raw_item(
+            self.rumor_source,
+            "Zelda remake leak",
+            "https://rumor.example/zelda-remake-broad",
+        )
+        official_raw = self.make_raw_item(
+            self.official_source,
+            "The Legend of Zelda launches next year",
+            "https://official.example/zelda-launch-broad",
+            raw_text="An official release date window was announced.",
+        )
+
+        process_raw_item(rumor_raw)
+        process_raw_item(official_raw)
+
+        self.assertEqual(Issue.objects.count(), 2)
 
     def test_mark_stale_issues_command_marks_old_open_issues(self):
         issue = Issue.objects.create(
@@ -242,6 +260,84 @@ class IssueGroupingTests(TestCase):
                 f"https://official.example/{slug}",
                 raw_text=text,
             )
+            item, _created = process_raw_item(raw)
+            items.append(item)
+
+        self.assertEqual(Issue.objects.count(), 3)
+        self.assertEqual(len({item.issue_links.get().issue_id for item in items}), 3)
+
+    def test_official_series_mixed_issue_is_marked_review_required(self):
+        franchises = [
+            Franchise.objects.create(name="Pikmin", slug="pikmin", aliases=["Pikmin", "Pikmin Bloom"], priority=80),
+            Franchise.objects.create(name="Mario", slug="mario", aliases=["Mario", "Mario Kart"], priority=90),
+            Franchise.objects.create(name="Kirby", slug="kirby", aliases=["Kirby", "Kirby Air Riders"], priority=80),
+            Franchise.objects.create(name="Pokémon", slug="pokemon", aliases=["Pokemon", "Pokémon"], priority=90),
+        ]
+        issue = Issue.objects.create(
+            title="13/04/2026 | Nintendo Switch 2 Kirby Air Riders Development Insights Read more",
+            canonical_topic="mixed official cards",
+            status=IssueStatus.CONFIRMED,
+            confidence_score=93,
+        )
+        titles = [
+            "Nintendo eShop Highlights – 30/04/2026 30/04/2026 | Nintendo Switch",
+            "Kirby Air Riders: Development Insights with Masahiro Sakurai – Part 1 Air Ride and Top Ride",
+            "Mario Kart World event announced for Nintendo Switch 2",
+            "Pokémon Champions update arrives on Nintendo Switch",
+            "Ask the Developer Vol. 18, Kirby Air Riders",
+            "Pikmin Bloom Game Pak Decor event starts",
+        ]
+        for index in range(14):
+            title = titles[index % len(titles)]
+            raw = self.make_raw_item(
+                self.official_source,
+                title,
+                f"https://official.example/mixed-series-{index}",
+                raw_text=f"{title} separate official card.",
+            )
+            item, _created = process_raw_item(raw)
+            item.issue_links.all().delete()
+            franchise = franchises[index % len(franchises)]
+            franchise_link, _created = item.franchise_links.get_or_create(
+                franchise=franchise,
+                defaults={"matched_alias": franchise.name, "confidence_score": 90, "is_primary": True},
+            )
+            if not franchise_link.is_primary:
+                franchise_link.is_primary = True
+                franchise_link.save(update_fields=["is_primary"])
+            NewsItemIssue.objects.create(
+                news_item=item,
+                issue=issue,
+                relation=IssueRelation.SAME_STORY,
+                relation_confidence=0.9,
+                explanation="same_story: shared_franchise=True, score=1.18",
+                decision_debug={"strong_signals": [], "weak_signals": ["same_source"], "decision": "linked"},
+            )
+
+        from news.services.issues import refresh_issue_review_status
+
+        refresh_issue_review_status(issue)
+        issue.refresh_from_db()
+
+        self.assertTrue(issue.review_required)
+        self.assertTrue(any("mixed_official_series" in reason or reason.startswith("same_story_items=") for reason in issue.review_reasons))
+
+    def test_breakdown_capcom_playstation_roundups_do_not_merge(self):
+        press = Source.objects.create(
+            name="Press Source",
+            slug="press-source",
+            url="https://press.example/feed",
+            source_type=SourceType.RSS,
+            trust_type=TrustType.PRESS,
+        )
+        titles = [
+            ("The Nintendo Breakdown 4 rumor roundup", "A broad Nintendo Switch 2 rumor roundup mentions many series."),
+            ("Capcom outlines every current PlayStation and PC project", "A Capcom industry article focused on PlayStation and PC."),
+            ("PlayStation Studios full lineup report", "A PlayStation Studios article with no Nintendo platform focus."),
+        ]
+        items = []
+        for index, (title, text) in enumerate(titles):
+            raw = self.make_raw_item(press, title, f"https://press.example/breakdown-{index}", raw_text=text)
             item, _created = process_raw_item(raw)
             items.append(item)
 

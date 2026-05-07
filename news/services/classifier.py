@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from news.models import Franchise, NewsCategory, Source, TrustLabel, TrustType
 
+from .importance import score_reason
 from .quality import FranchiseMatch
 from .text import normalize_title
 
@@ -15,7 +16,7 @@ class ClassificationResult:
     category: str
     tags: list[str]
     confidence_score: int
-    trust_reasons: list[str]
+    trust_reasons: list[dict[str, str]]
 
 
 KEYWORDS = {
@@ -89,14 +90,17 @@ def classify_trust_label(source: Source) -> str:
     return TrustLabel.UNKNOWN
 
 
-def trust_reasons_for(source: Source, trust_label: str) -> list[str]:
+def trust_reasons_for(source: Source, trust_label: str) -> list[dict[str, str]]:
     if trust_label == TrustLabel.OFFICIAL:
-        return ["공식 출처에서 수집됨"]
+        return [score_reason("official_source_collected", "공식 출처에서 수집됨")]
     if trust_label == TrustLabel.REPORTED:
-        return ["전문 매체 보도 출처"]
+        return [score_reason("reputable_media", "전문 매체 보도 출처")]
     if trust_label == TrustLabel.RUMOR:
-        return ["루머/유출 커뮤니티 또는 RSS 경유", "공식 확인 전"]
-    return [f"{source.name} 출처 기준 확인 상태 미정"]
+        return [
+            score_reason("reddit_rumor_source", "루머/유출 커뮤니티 또는 RSS 경유"),
+            score_reason("no_official_confirmation", "공식 확인 전"),
+        ]
+    return [score_reason("unknown_source_trust", f"{source.name} 출처 기준 확인 상태 미정")]
 
 
 def detect_tags(lower_text: str, normalized_text: str | None = None) -> list[str]:

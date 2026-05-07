@@ -36,10 +36,28 @@
       {% for tag in item.detected_tags %}
         <span class="badge {{ tag|tag_class }}">{{ tag|tag_label }}</span>
       {% endfor %}
-      {% for link in item.franchise_links.all %}
-        <a class="badge reported" href="{% url 'news:franchise_detail' link.franchise.slug %}">{{ link.franchise.name }}</a>
+      {% for game_type in primary_game_types %}
+        <a class="badge reported" href="{% url 'news:franchise_detail' game_type.slug %}">{{ game_type.name }}</a>
       {% endfor %}
     </div>
+    {% if primary_game_types %}
+      <div class="meta" style="margin-top: 10px;">
+        <span>주요 게임종류:
+          {% for game_type in primary_game_types %}
+            {{ game_type.name }}{% if not forloop.last %}, {% endif %}
+          {% endfor %}
+        </span>
+      </div>
+    {% endif %}
+    {% if mentioned_game_types %}
+      <div class="meta" style="margin-top: 10px;">
+        <span>언급된 게임종류:
+          {% for game_type in mentioned_game_types %}
+            {{ game_type.name }}{% if not forloop.last %}, {% endif %}
+          {% endfor %}
+        </span>
+      </div>
+    {% endif %}
   </section>
   <section class="card">
     <h2>메타데이터</h2>
@@ -51,8 +69,8 @@
       <span>신뢰도 점수: {{ item.confidence_score }}</span>
       <span>닌텐도 관련성: {{ item.nintendo_relevance_score }}</span>
       <span>콘텐츠 유형: {{ item.content_type }}</span>
-      <span>중요도 이유: {% if item.importance_reasons %}{{ item.importance_reasons|join:", " }}{% else %}재계산 필요{% endif %}</span>
-      <span>신뢰도 이유: {% if item.trust_reasons %}{{ item.trust_reasons|join:", " }}{% else %}재계산 필요{% endif %}</span>
+      <span>중요도 이유: {{ item.importance_reasons|reason_labels|join:", " }}</span>
+      <span>신뢰도 이유: {{ item.trust_reasons|reason_labels|join:", " }}</span>
       <span>날짜 신뢰도: {{ item.date_confidence }}{% if item.is_date_suspect %} · {{ item.date_suspect_reason }}{% endif %}</span>
       <span>표준 URL: {{ item.canonical_url|default:"없음" }}</span>
       {% source_attribution item as source_rows %}
@@ -66,7 +84,7 @@
 <section class="card" style="margin-top: 14px;">
   <h2>연결된 이슈</h2>
   {% if issue_link %}
-    <p><a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title }}</a> · {{ issue_link.issue.status_ko }} · {{ issue_link.get_relation_display }}{% if issue_link.explanation %} · {{ issue_link.explanation }}{% endif %}</p>
+    <p><a href="{% url 'news:issue_detail' issue_link.issue.pk %}">{{ issue_link.issue.title }}</a> · {{ issue_link.issue.status_ko }} · {{ issue_link.relation|relation_label }}{% if show_issue_debug and issue_link.explanation %} · {{ issue_link.explanation }}{% endif %}</p>
   {% else %}
     <p class="muted">연결된 이슈가 없습니다.</p>
   {% endif %}

@@ -21,6 +21,7 @@ from django.views.decorators.http import require_POST
 from .forms import NewsItemFilterForm
 from .models import Franchise, Issue, IssueRelation, IssueStatus, NewsContentType, NewsItem, NewsItemIssue, RawItem, Source, UserFranchiseFavorite
 from .services.collectors import collect_source, process_raw_item, recalculate_news_item
+from .services.importance import reason_labels
 from .services.quality import LOW_CONFIDENCE_THRESHOLD, fallback_summary_for, is_generic_summary, public_excerpt
 
 
@@ -120,24 +121,68 @@ def _home_headline_sections() -> list[dict[str, object]]:
         .exclude(issue_links__issue__review_required=True)
         .distinct()
     )
+    today = timezone.localdate()
+    today_start = _day_start(today)
+    now = timezone.now()
+
+    headline_items = _headline_candidates_with_fallback(
+        base.filter(trust_label__in=["official", "reported"]),
+        tiers=[
+            Q(published_at__gte=today_start, importance_score__gte=80),
+            Q(first_seen_at__gte=now - timedelta(hours=24), importance_score__gte=80),
+            Q(first_seen_at__gte=now - timedelta(hours=48), importance_score__gte=70),
+        ],
+        order_by=["-importance_score", "-confidence_score", F("published_at").desc(nulls_last=True)],
+    )
+    official_items = _headline_candidates_with_fallback(
+        base.filter(trust_label="official"),
+        tiers=[
+            Q(published_at__gte=today_start),
+            Q(first_seen_at__gte=now - timedelta(hours=24)),
+            Q(first_seen_at__gte=now - timedelta(hours=48)),
+        ],
+        order_by=["-confidence_score", "-importance_score", F("published_at").desc(nulls_last=True)],
+    )
+    rumor_items = _headline_candidates_with_fallback(
+        base.filter(Q(trust_label="rumor") | Q(category__in=["rumor", "leak"])),
+        tiers=[
+            Q(published_at__gte=today_start),
+            Q(first_seen_at__gte=now - timedelta(hours=24)),
+            Q(first_seen_at__gte=now - timedelta(hours=48)),
+        ],
+        order_by=["-importance_score", F("published_at").desc(nulls_last=True)],
+    )
     return [
         {
             "title": "오늘의 핵심 5개",
-            "items": list(base.filter(trust_label__in=["official", "reported"]).order_by("-importance_score", "-confidence_score", F("published_at").desc(nulls_last=True))[:5]),
+            "items": headline_items,
             "empty": "아직 오늘 핵심으로 뽑을 항목이 없습니다.",
         },
         {
             "title": "공식 확인된 소식",
-            "items": list(base.filter(trust_label="official").order_by("-confidence_score", "-importance_score", F("published_at").desc(nulls_last=True))[:5]),
+            "items": official_items,
             "empty": "최근 공식 확인 소식이 없습니다.",
         },
         {
             "title": "관찰 중인 루머",
-            "items": list(base.filter(Q(trust_label="rumor") | Q(category__in=["rumor", "leak"])).order_by("-importance_score", F("published_at").desc(nulls_last=True))[:5]),
+            "items": rumor_items,
             "empty": "현재 표시할 루머 항목이 없습니다.",
             "rumor": True,
         },
     ]
+
+
+def _headline_candidates_with_fallback(queryset, *, tiers: list[Q], order_by: list[object]) -> list[NewsItem]:
+    for tier in tiers:
+        candidates = list(queryset.filter(tier).order_by(*order_by).distinct()[:20])
+        items = [item for item in candidates if reason_labels(item.importance_reasons)][:5]
+        if items:
+            return items
+    return []
+
+
+def _show_internal_debug(request) -> bool:
+    return bool(settings.DEBUG or getattr(request.user, "is_staff", False))
 
 
 def _sanitize_public_error(error: str) -> str:
@@ -398,6 +443,8 @@ def item_detail(request, pk: int):
         "inLanguage": item.language or "ko-KR",
     }
     about = [link.franchise.name for link in item.franchise_links.all() if link.is_primary]
+    primary_game_types = [link.franchise for link in item.franchise_links.all() if link.is_primary]
+    mentioned_game_types = _mentioned_game_types(item, {franchise.slug for franchise in primary_game_types})
     if about:
         article_json_ld["about"] = about
     if item.published_at:
@@ -418,6 +465,9 @@ def item_detail(request, pk: int):
             "show_summary": show_summary,
             "display_summary": item.summary_ko if show_summary else fallback_summary_for(item),
             "public_excerpt": public_excerpt(item.raw_item.raw_text),
+            "primary_game_types": primary_game_types,
+            "mentioned_game_types": mentioned_game_types,
+            "show_issue_debug": _show_internal_debug(request),
             "article_json_ld": json.dumps(article_json_ld, ensure_ascii=False),
             **_seo_context(
                 request,
@@ -525,6 +575,7 @@ def issue_detail(request, pk: int):
             "item_count": len(links),
             "official_count": official_count,
             "rumor_count": rumor_count,
+            "show_issue_debug": _show_internal_debug(request),
             **_seo_context(
                 request,
                 canonical_url=_absolute_url(request, "news:issue_detail", issue.pk),
@@ -532,6 +583,19 @@ def issue_detail(request, pk: int):
             ),
         },
     )
+
+
+def _mentioned_game_types(item: NewsItem, primary_slugs: set[str]) -> list[dict[str, str]]:
+    seen = set(primary_slugs)
+    mentioned: list[dict[str, str]] = []
+    for mention in item.entity_mentions or []:
+        slug = str(mention.get("slug") or "").strip()
+        name = str(mention.get("name") or slug).strip()
+        if not slug or slug in seen or mention.get("is_primary"):
+            continue
+        seen.add(slug)
+        mentioned.append({"slug": slug, "name": name})
+    return mentioned
 
 
 def source_list(request):

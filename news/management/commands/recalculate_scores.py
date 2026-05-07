@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 
 from news.models import NewsItem
 from news.services.classifier import classify_item
-from news.services.importance import calculate_importance_with_reasons, calculate_nintendo_relevance
+from news.services.importance import calculate_importance_with_reasons, calculate_nintendo_relevance, score_reason
 from news.services.quality import classify_content_type, date_quality_update_fields, is_backfill_item, title_quality
 from news.services.text import normalize_title
 
@@ -16,12 +16,16 @@ class Command(BaseCommand):
         parser.add_argument("--apply", action="store_true", help="Write recalculated fields.")
         parser.add_argument("--dry-run", action="store_true", help="Show changes without saving. This is the default.")
         parser.add_argument("--item", type=int, default=None, help="Limit to one NewsItem ID.")
+        parser.add_argument("--source", type=str, default="", help="Limit to one Source slug.")
+        parser.add_argument("--only-missing-reasons", action="store_true", help="Only update items whose score reasons are missing or placeholders.")
         parser.add_argument("--limit", type=int, default=None, help="Maximum items to scan.")
 
     def handle(self, *args, **options):
         qs = NewsItem.objects.select_related("raw_item", "source").prefetch_related("franchise_links__franchise").order_by("-created_at")
         if options["item"]:
             qs = qs.filter(pk=options["item"])
+        if options["source"]:
+            qs = qs.filter(source__slug=options["source"])
         if options["limit"]:
             qs = qs[: options["limit"]]
 
@@ -29,15 +33,23 @@ class Command(BaseCommand):
         changed = 0
         for item in qs:
             scanned += 1
+            if options["only_missing_reasons"] and not _needs_reason_recalc(item):
+                continue
             updates = recalculated_fields(item)
+            if options["only_missing_reasons"]:
+                updates = {
+                    "importance_reasons": updates["importance_reasons"],
+                    "trust_reasons": updates["trust_reasons"],
+                }
             diff = {field: value for field, value in updates.items() if getattr(item, field) != value}
             if not diff:
                 continue
             changed += 1
+            display_title = updates.get("title", item.title)
             self.stdout.write(
                 f"{'UPDATE' if options['apply'] else 'DRY-RUN'} item #{item.pk}: "
-                f"importance {item.importance_score}->{updates['importance_score']} "
-                f"relevance {item.nintendo_relevance_score}->{updates['nintendo_relevance_score']} | {updates['title']}"
+                f"importance {item.importance_score}->{updates.get('importance_score', item.importance_score)} "
+                f"relevance {item.nintendo_relevance_score}->{updates.get('nintendo_relevance_score', item.nintendo_relevance_score)} | {display_title}"
             )
             if options["apply"]:
                 for field, value in diff.items():
@@ -82,8 +94,8 @@ def recalculated_fields(item: NewsItem) -> dict[str, object]:
         nintendo_relevance_score=relevance,
     )
     if importance > 0 and not importance_reasons:
-        importance_reasons = ["자동 중요도 계산 기준"]
-    trust_reasons = classification.trust_reasons or ["출처 기준 신뢰도 계산"]
+        importance_reasons = [score_reason("fallback_importance_reason", "자동 중요도 계산 기준")]
+    trust_reasons = classification.trust_reasons or [score_reason("fallback_trust_reason", "출처 기준 신뢰도 계산")]
     return {
         "title": title,
         "normalized_title": normalize_title(title),
@@ -105,3 +117,20 @@ def recalculated_fields(item: NewsItem) -> dict[str, object]:
         "is_date_suspect": date_quality["is_date_suspect"],
         "date_suspect_reason": date_quality["date_suspect_reason"],
     }
+
+
+def _needs_reason_recalc(item: NewsItem) -> bool:
+    return _reason_missing_or_placeholder(item.importance_reasons) or _reason_missing_or_placeholder(item.trust_reasons)
+
+
+def _reason_missing_or_placeholder(reasons) -> bool:
+    if not reasons:
+        return True
+    for reason in reasons:
+        if isinstance(reason, dict):
+            value = str(reason.get("label") or reason.get("code") or "")
+        else:
+            value = str(reason)
+        if "재계산 필요" in value:
+            return True
+    return False

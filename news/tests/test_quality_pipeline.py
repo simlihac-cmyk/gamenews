@@ -49,6 +49,14 @@ class QualityPipelineTests(TestCase):
             clean_title("The making of the music of Kirby Air Riders – Chapter 2"),
             "The making of the music of Kirby Air Riders – Chapter 2",
         )
+        self.assertEqual(
+            clean_title("13/04/2026 | Nintendo Switch 2 Kirby Air Riders: Development Insights with Masahiro Sakurai – Part 1 Air Ride and Top Ride"),
+            "Kirby Air Riders: Development Insights with Masahiro Sakurai – Part 1 Air Ride and Top Ride",
+        )
+        self.assertEqual(
+            clean_title("Nintendo eShop Highlights – 30/04/2026 30/04/2026 | Nintendo Switch Latest games"),
+            "Nintendo eShop Highlights",
+        )
 
     def test_long_or_body_like_title_is_marked_suspect_and_not_issue_title(self):
         raw = self.make_raw(
@@ -232,6 +240,13 @@ class QualityPipelineTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.importance_reasons, [])
         self.assertIn("DRY-RUN", recalc_out.getvalue())
+
+        apply_out = StringIO()
+        call_command("recalculate_scores", "--apply", "--only-missing-reasons", "--item", str(item.pk), stdout=apply_out)
+        item.refresh_from_db()
+        self.assertTrue(item.importance_reasons)
+        self.assertTrue(item.trust_reasons)
+        self.assertIsInstance(item.importance_reasons[0], dict)
 
     def test_switch2_only_overlap_does_not_group_same_issue(self):
         first = self.make_raw(

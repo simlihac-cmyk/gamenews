@@ -25,6 +25,7 @@ from news.models import (
     IssueRelation,
     IssueStatus,
     NewsCategory,
+    NewsContentType,
     NewsItem,
     NewsItemFranchise,
     NewsItemIssue,
@@ -37,7 +38,7 @@ from news.models import (
 
 from .classifier import classify_item, detect_franchise_matches
 from .dedupe import content_hash_for, find_existing_news_item, find_existing_raw_item
-from .importance import calculate_importance_with_reasons, calculate_nintendo_relevance
+from .importance import calculate_importance_with_reasons, calculate_nintendo_relevance, score_reason
 from .issues import rebuild_issue_title, refresh_issue_review_status
 from .quality import (
     LOW_CONFIDENCE_THRESHOLD,
@@ -477,9 +478,9 @@ def process_raw_item(raw_item: RawItem, *, recalculate: bool = False) -> tuple[N
         nintendo_relevance_score=relevance,
     )
     if importance > 0 and not importance_reasons:
-        importance_reasons = ["자동 중요도 계산 기준"]
+        importance_reasons = [score_reason("fallback_importance_reason", "자동 중요도 계산 기준")]
     if classification.confidence_score > 0 and not classification.trust_reasons:
-        classification.trust_reasons.append("출처 기준 신뢰도 계산")
+        classification.trust_reasons.append(score_reason("fallback_trust_reason", "출처 기준 신뢰도 계산"))
     summary_ko = summary_quality_fallback(
         trust_label=classification.trust_label,
         content_type=content_type,
@@ -660,7 +661,7 @@ def _html_payloads_from_selectors(source: Source, soup: BeautifulSoup, page_html
         title_el = item.select_one(config.get("title_selector", "")) if config.get("title_selector") else None
         link_el = item.select_one(config.get("link_selector", "")) if config.get("link_selector") else item.find("a", href=True)
         date_el = item.select_one(config.get("date_selector", "")) if config.get("date_selector") else None
-        title = _select_text(title_el) if title_el else _select_text(link_el)
+        title = _select_text(title_el) if title_el else _best_link_title(link_el, config.get("generic_title_selector"))
         href = _select_attr(link_el, link_attr) if link_el else ""
         if not title or not href:
             continue
@@ -704,7 +705,7 @@ def _html_payloads_generic(source: Source, soup: BeautifulSoup, page_html: str) 
     config = adapter_config(source)
     base_url = config.get("base_url") or source.url
     for link in soup.find_all("a", href=True):
-        title = normalize_whitespace(link.get_text(" "))
+        title = _best_link_title(link, config.get("generic_title_selector"))
         href = link.get("href", "")
         if not title or not href:
             continue
@@ -838,6 +839,27 @@ def _json_path_value(item: dict[str, Any], path: str):
 def _select_text(element) -> str:
     if element is None:
         return ""
+    return normalize_whitespace(element.get_text(" "))
+
+
+def _best_link_title(element, selectors: str | None = None) -> str:
+    if element is None:
+        return ""
+    selector_list = [part.strip() for part in str(selectors or "").split(",") if part.strip()] or [
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "[class*='title']",
+        "[class*='headline']",
+        "[data-testid*='title']",
+        "[data-testid*='headline']",
+    ]
+    for selector in selector_list:
+        candidate = element.select_one(selector) if hasattr(element, "select_one") else None
+        text = _select_text(candidate)
+        if len(text) >= 12:
+            return text
     return normalize_whitespace(element.get_text(" "))
 
 
@@ -1116,11 +1138,22 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
             news_item.canonical_url
             and any(item.pk != news_item.pk and item.canonical_url == news_item.canonical_url for item in issue_items)
         )
+        same_source = any(item.source_id == news_item.source_id for item in issue_items)
         confirmation_candidate = (
             news_item.trust_label == TrustLabel.OFFICIAL
             and issue.status in {IssueStatus.RUMOR, IssueStatus.DEVELOPING}
         )
+        followup_candidate = (
+            news_item.trust_label == TrustLabel.REPORTED
+            and any(item.trust_label == TrustLabel.OFFICIAL for item in issue_items)
+        )
         similarity = difflib.SequenceMatcher(None, normalize_title(news_item.title), normalize_title(issue.title)).ratio()
+        issue_relevance = max([getattr(item, "nintendo_relevance_score", 2) for item in issue_items] or [2])
+        low_relevance = min(getattr(news_item, "nintendo_relevance_score", 2), issue_relevance) < 3
+        broad_collection = news_item.content_type in {NewsContentType.ROUNDUP, NewsContentType.LIST_PAGE, NewsContentType.HUB_PAGE} or any(
+            item.content_type in {NewsContentType.ROUNDUP, NewsContentType.LIST_PAGE, NewsContentType.HUB_PAGE}
+            for item in issue_items
+        )
         strong_signals: list[str] = []
         weak_signals: list[str] = []
         if duplicate_url:
@@ -1130,33 +1163,43 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
         elif similarity >= 0.68:
             weak_signals.append(f"title_similarity={similarity:.2f}")
         if overlap >= 2:
-            strong_signals.append(f"shared_specific_tokens={shared_tokens[:6]}")
+            if low_relevance or broad_collection:
+                weak_signals.append(f"shared_specific_tokens={shared_tokens[:6]}")
+            else:
+                strong_signals.append(f"shared_specific_tokens={shared_tokens[:6]}")
         elif overlap:
             weak_signals.append(f"shared_specific_tokens={shared_tokens[:6]}")
             if confirmation_candidate:
                 strong_signals.append("shared_specific_token_confirmation")
         if shared_franchise:
             weak_signals.append("shared_primary_franchise")
-            if overlap >= 2:
+            if overlap >= 2 and not low_relevance and not broad_collection:
                 strong_signals.append("shared_primary_franchise_with_entities")
             if confirmation_candidate and overlap >= 1:
                 strong_signals.append("shared_primary_franchise_confirmation")
         confirmation_context = confirmation_candidate and _has_confirmation_context(f"{news_item.title} {news_item.summary_original}")
         if confirmation_context:
             strong_signals.append("official_confirmation_context")
+        if same_source:
+            weak_signals.append("same_source")
+        if news_item.source.slug in {"nintendo-us-whats-new", "nintendo-uk-news"}:
+            weak_signals.append("official_listing_source")
+        if low_relevance:
+            weak_signals.append("low_nintendo_relevance")
+        if broad_collection:
+            weak_signals.append("broad_collection_or_list_page")
 
-        low_relevance = getattr(news_item, "nintendo_relevance_score", 2) < 2
         same_story = duplicate_url or (
             not low_relevance
+            and not broad_collection
             and len(strong_signals) >= 2
             and (similarity >= 0.72 or overlap >= 2)
         )
         confirmation = confirmation_candidate and (
-            (
-                len(strong_signals) >= 2
-                and (overlap >= 1 or similarity >= 0.68 or "official_confirmation_context" in strong_signals)
-            )
-            or (confirmation_context and (shared_franchise or overlap >= 1 or similarity >= 0.45))
+            not low_relevance
+            and not broad_collection
+            and len(strong_signals) >= 2
+            and (overlap >= 1 or similarity >= 0.68 or "official_confirmation_context" in strong_signals)
         )
         decision_debug = {
             "strong_signals": strong_signals,
@@ -1167,7 +1210,14 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
             "overlap": overlap,
             "candidate_issue_id": issue.pk,
         }
-        if not same_story and not confirmation:
+        follow_up = (
+            followup_candidate
+            and not low_relevance
+            and not broad_collection
+            and len(strong_signals) >= 2
+            and (overlap >= 1 or similarity >= 0.72)
+        )
+        if not same_story and not confirmation and not follow_up:
             decision_debug.update(
                 {
                     "decision": "new_issue",
@@ -1195,7 +1245,10 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
         if confirmation:
             score = max(score, 0.65)
 
-        threshold = 0.5 if confirmation else 0.72
+        if follow_up:
+            score = max(score, 0.65)
+
+        threshold = 0.5 if confirmation or follow_up else 0.72
         if duplicate_url:
             score = max(score, 0.95)
         if score > best_score and score >= threshold:
@@ -1203,6 +1256,8 @@ def _find_related_issue(news_item: NewsItem) -> IssueMatch | None:
                 relation = IssueRelation.SOURCE_DUPLICATE
             elif confirmation:
                 relation = IssueRelation.OFFICIAL_CONFIRMATION
+            elif follow_up:
+                relation = IssueRelation.FOLLOWUP
             else:
                 relation = IssueRelation.SAME_STORY
             decision_debug.update(

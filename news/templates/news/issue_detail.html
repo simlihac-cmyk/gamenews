@@ -42,7 +42,7 @@
           <span>{% published_status link.news_item %}</span>
           <span>수집 {{ link.news_item.first_seen_at|date:"Y-m-d H:i" }}</span>
           <span>중요도 {{ link.news_item.importance_score }}</span>
-          {% if link.explanation %}<span>{{ link.explanation }}</span>{% endif %}
+          {% if show_issue_debug and link.explanation %}<span>{{ link.explanation }}</span>{% endif %}
           {% for franchise_link in link.news_item.franchise_links.all %}
             <span>{{ franchise_link.franchise.name }}</span>
           {% endfor %}
@@ -76,7 +76,7 @@
           <div class="meta">
             <span>{{ link.news_item.source.name }}</span>
             <span>{% published_status link.news_item %}</span>
-            {% if link.explanation %}<span>{{ link.explanation }}</span>{% endif %}
+            {% if show_issue_debug and link.explanation %}<span>{{ link.explanation }}</span>{% endif %}
           </div>
         </div>
       {% endfor %}

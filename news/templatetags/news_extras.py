@@ -2,6 +2,7 @@ from django import template
 from django.utils import timezone
 
 from news.models import PublishedAtPrecision, SourceType
+from news.services.importance import reason_labels as extract_reason_labels
 from news.services.quality import is_generic_summary
 
 register = template.Library()
@@ -68,6 +69,12 @@ def category_class(value: str) -> str:
 @register.filter
 def relation_label(value: str) -> str:
     return RELATION_LABELS.get(value, value)
+
+
+@register.filter
+def reason_labels(value) -> list[str]:
+    labels = extract_reason_labels(value)
+    return labels or ["점수 설명 준비 중"]
 
 
 @register.filter
