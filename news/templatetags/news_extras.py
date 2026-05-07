@@ -1,3 +1,5 @@
+import re
+
 from django import template
 from django.utils import timezone
 
@@ -50,6 +52,9 @@ RELATION_LABELS = {
     "related": "관련",
 }
 
+SUMMARY_LABEL_ORDER = {"무슨 일?": 0, "왜 중요?": 1, "확인 상태": 2, "주의": 3}
+SUMMARY_LABEL_RE = re.compile(r"(?P<label>무슨 일\?|왜 중요\?|확인 상태|주의)\s*:\s*")
+
 
 @register.filter
 def tag_label(value: str) -> str:
@@ -89,8 +94,7 @@ def summary_blocks(value: str) -> list[dict[str, str]]:
         clean = " ".join(line.split())
         if not clean:
             continue
-        label, text = _split_summary_line(clean)
-        blocks.append({"label": label, "text": text})
+        blocks.extend(_split_summary_segments(clean))
     if not blocks and value:
         blocks.append({"label": "", "text": " ".join(str(value).split())})
     return blocks
@@ -99,21 +103,41 @@ def summary_blocks(value: str) -> list[dict[str, str]]:
 @register.filter
 def summary_preview(value: str) -> list[dict[str, str]]:
     blocks = summary_blocks(value)
-    priority = {"무슨 일?": 0, "왜 중요?": 1, "확인 상태": 2, "주의": 3}
-    blocks.sort(key=lambda block: priority.get(block["label"], 9))
+    blocks.sort(key=lambda block: SUMMARY_LABEL_ORDER.get(block["label"], 9))
     return blocks[:2]
 
 
+def _split_summary_segments(value: str) -> list[dict[str, str]]:
+    matches = list(SUMMARY_LABEL_RE.finditer(value))
+    if not matches:
+        label, text = _split_summary_line(value)
+        return [{"label": label, "text": text}]
+
+    blocks: list[dict[str, str]] = []
+    leading_text = value[: matches[0].start()].strip(" -:·")
+    if leading_text:
+        blocks.append({"label": "", "text": leading_text})
+    for index, match in enumerate(matches):
+        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+        text = value[match.end() : next_start].strip(" -:·")
+        if text:
+            blocks.append({"label": match.group("label"), "text": text})
+    return blocks
+
+
 def _split_summary_line(value: str) -> tuple[str, str]:
-    known_labels = ["무슨 일?", "왜 중요?", "확인 상태", "주의"]
-    for label in known_labels:
+    for label in SUMMARY_LABEL_ORDER:
         prefix = f"{label}:"
         if value.startswith(prefix):
             return label, value[len(prefix) :].strip()
     if ":" in value:
         label, text = value.split(":", 1)
         if 1 <= len(label) <= 12:
-            return label.strip(), text.strip()
+            label = label.strip()
+            text = text.strip()
+            if not text:
+                return "", label
+            return label, text
     return "", value
 
 

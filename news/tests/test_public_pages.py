@@ -178,13 +178,29 @@ class PublicPageSecurityAndSeoTests(TestCase):
             content_hash=create_content_hash("Switch 2 rumor reportedly gains traction", "https://example.com/news/switch-2-rumor"),
         )
         item, _created = process_raw_item(raw)
+        item.summary_ko = (
+            "무슨 일?: 해외 출처의 Star Fox announced for Switch 2 항목입니다. "
+            "왜 중요?: 신작 발표와 Switch 2 흐름에 직접 연결됩니다. "
+            "확인 상태: 해외 매체 보도입니다. "
+            "주의: 세부 맥락은 원문에서 확인하세요.\n"
+            "핵심 내용:\n"
+            "- 요약 섹션 제목만 있는 줄도 빈 칸 없이 보여야 합니다."
+        )
+        item.save(update_fields=["summary_ko"])
 
         response = self.client.get(reverse("news:item_detail", args=[item.pk]))
         html = response.content.decode()
 
+        self.assertContains(response, 'class="card summary-card"')
         self.assertContains(response, 'class="summary-list"')
         self.assertContains(response, "무슨 일?")
         self.assertContains(response, "왜 중요?")
+        self.assertContains(response, "확인 상태")
+        self.assertContains(response, "주의")
+        self.assertContains(response, "핵심 내용")
+        self.assertGreaterEqual(html.count('class="summary-row"'), 4)
+        self.assertContains(response, '<span class="summary-text">신작 발표와 Switch 2 흐름에 직접 연결됩니다.</span>')
+        self.assertNotContains(response, '<span class="summary-text"></span>')
         self.assertContains(response, "원문 보기")
         excerpt = html.split('<div class="pre">', 1)[1].split("</div>", 1)[0]
         self.assertLessEqual(len(excerpt), 520)
